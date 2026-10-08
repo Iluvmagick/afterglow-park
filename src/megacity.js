@@ -7,8 +7,8 @@
 //   N   supertall tower (twisting tiers, Sky Elevator ring chain to a sky deck, sticky crown)
 //   NW  three glass towers + a sky-ship deck with an infinity pool (middle tower is sticky)
 //   NE  golden frame with a homing ring that throws you onto the supertall's sky deck
-//   E   the Sail: a 3600-high curved ice drop -> runout -> kicker...
-//   SE  ...onto a black glass pyramid you surf (with a sky beam)
+//   E   the Sail: a 3600-high curved ice drop -> runout -> homing arch...
+//   SE  ...onto the gold top of a black glass pyramid you surf down and around (with a sky beam)
 //   S   a buried colossal Helios head with a golden crown of rays
 //   SW  the Palm: a skateable ice palm island inside a wallrun crescent
 //   all around: the Vaporway ring highway (speed strips, rails, arches, ramps), giant floating columns
@@ -18,6 +18,7 @@ export function buildMegacity(api) {
   const { add, box, obox, cylinder, pad, orb, target, ring, tiltedColumn, ellipsoid, decor, PINK, CYAN } = api;
   const beams = [];
   const M = { cell: 1024 };
+  const PYRAMID = {};
   const at = (r, a) => ({ x: Math.cos(a) * r, z: Math.sin(a) * r });
   const yawOf = (d) => Math.atan2(d.x, d.z); // obox yaw whose long (hz) axis points along d
   const norm = (d) => {
@@ -191,29 +192,31 @@ export function buildMegacity(api) {
   box(SAIL.x0, SAIL.top - 100, -3700, SAIL.x1, SAIL.top, SAIL.zTop, { top: 'megamarble', side: 'glass' }, M);
   box(5900, 0, -3900, 6100, 4800, -3700, 'glass', M);
   add([{ x: 5900, y: 4800, z: -3900 }, { x: 6100, y: 4800, z: -3900 }, { x: 5900, y: 4800, z: -3700 }, { x: 6100, y: 4800, z: -3700 }, { x: 6000, y: 5200, z: -3800 }], 'megagold', M);
-  // runout + kicker toward the pyramid
+  // runout, ending in a homing arch that throws you onto the deck on the pyramid's tip
   box(SAIL.x0, 0, SAIL.zBottom, SAIL.x1, 2, 2200, { top: 'megaice', side: 'megamarble' }, { ...M, phys: 'ice' });
-  ramp({ x: 6000, z: 2200 }, { x: 6000, z: 2700 }, 700, 2, 320, { top: 'megasurf', side: 'megamarble' }, { phys: 'ice' });
   orb(6000, SAIL.top + 80, -3350);
   megaPad(5300, 3900, { x: 6000, y: SAIL.top, z: -3350 }, 4600);
 
   // ================================================================ SE: black glass pyramid
+  // Surf it: from the gold plateau on top, step off any edge onto a face, hold strafe into the face
+  // and carve down and around (the faces are 58 degrees: too steep to stand on, made for surfing).
+  // The plateau's edges run straight into the faces, so there's no ledge to snag a wallrun on.
   {
     const c = { x: 5800, z: 6700 };
-    const h = 1500;
-    add(
-      [
-        { x: c.x - h, y: 0, z: c.z - h },
-        { x: c.x + h, y: 0, z: c.z - h },
-        { x: c.x - h, y: 0, z: c.z + h },
-        { x: c.x + h, y: 0, z: c.z + h },
-        { x: c.x, y: 2400, z: c.z },
-      ],
-      'megaobsidian',
-      M,
-    );
-    beams.push({ x: c.x, y: 2400, z: c.z, kind: 'pyramid' });
-    orb(c.x, 2470, c.z);
+    const h = 1500; // half the base
+    const top = 2000; // cut flat here (the faces would meet at 2400)
+    const w = h * (1 - top / 2400); // half the plateau: 250
+    const pts = [];
+    for (const [y, r] of [[0, h], [top, w]]) for (const sx of [-1, 1]) for (const sz of [-1, 1]) pts.push({ x: c.x + sx * r, y, z: c.z + sz * r });
+    add(pts, { top: 'megagold', side: 'megaobsidian' }, M);
+    beams.push({ x: c.x, y: top + 110, z: c.z, kind: 'pyramid' }); // starts above your head on the plateau
+    orb(c.x, top + 60, c.z);
+    // a half-buried ring across the whole width of the Sail's runout: wherever you pass through it,
+    // it throws you onto the north end of the plateau, where you skid to a stop
+    ring(6000, 0, 2450, 0, 0, 1, 2400, { radius: 800, target: { x: c.x, y: top + 50, z: c.z - 120 }, flightTime: 4, gravity: GRAVITY, style: 'mega' });
+    PYRAMID.c = c;
+    PYRAMID.h = h;
+    PYRAMID.deck = { hx: w, hz: w, y: top };
   }
 
   // ================================================================ S: the buried colossus
@@ -314,5 +317,5 @@ export function buildMegacity(api) {
   // the big one: from the west gate onto the supertall's sky deck
   megaPad(-5800, 1250, { x: BJ.x, y: 5000, z: BJ.z + 650 }, 6600, 8);
 
-  return { beams };
+  return { beams, pyramid: PYRAMID };
 }

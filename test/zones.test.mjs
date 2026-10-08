@@ -184,3 +184,59 @@ test('megacity: dropping into the Sail builds huge speed', () => {
   });
   assert.ok(maxSpeed > 1800, `sail speed ${maxSpeed.toFixed(0)}`);
 });
+
+test('megacity: from any line down the Sail, the arch throws you onto the pyramid top and you stop there', () => {
+  const { c, deck } = level.mega.pyramid;
+  for (const x of [5450, 6000, 6550]) {
+    const sim = new Sim(level);
+    const p = sim.player;
+    p.reset({ x, y: 3600.25, z: -3300 }, Math.PI);
+    let landed = false;
+    const events = runBot(sim, 125 * 14, (i, pl) => {
+      landed ||= pl.onGround && Math.abs(pl.pos.y - deck.y) < 2;
+      return { yaw: Math.PI, forward: landed ? 0 : 1 }; // hold W the whole way, let go once down
+    });
+    assert.ok(events.some((e) => e.type === 'ring'), `x=${x}: missed the arch`);
+    const off = { x: p.pos.x - c.x, z: p.pos.z - c.z };
+    assert.ok(p.onGround && Math.abs(p.pos.y - deck.y) < 2 && Math.abs(off.x) < deck.hx && Math.abs(off.z) < deck.hz, `x=${x}: ended at ${JSON.stringify(p.pos)}, not on the deck`);
+  }
+});
+
+// Surfing the pyramid like a player: step off the gold top, then on each face look along it (clockwise
+// round the pyramid), turned `beta` down the slope, and hold strafe into the face.
+function surfPyramid(beta) {
+  const { c, deck } = level.mega.pyramid;
+  const yawOf = (dx, dz) => Math.atan2(-dx, -dz);
+  const along = { N: yawOf(1, 0), E: yawOf(0, 1), S: yawOf(-1, 0), W: yawOf(0, -1) };
+  const sim = new Sim(level);
+  const p = sim.player;
+  p.reset({ x: c.x - 100, y: deck.y + 0.25, z: c.z - 200 }, along.N);
+  const faces = [];
+  let around = 0;
+  let prevA = null;
+  let topSpeed = 0;
+  const events = runBot(sim, 125 * 14, (i, pl) => {
+    const dx = pl.pos.x - c.x;
+    const dz = pl.pos.z - c.z;
+    const face = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 'E' : 'W') : dz > 0 ? 'S' : 'N';
+    if (pl.pos.y > deck.y - 40) return { yaw: along.N, forward: 1, right: -1 }; // run off the top
+    if (pl.pos.y < 30) return null; // reached the ground
+    const a = Math.atan2(dz, dx);
+    if (prevA !== null) around += Math.abs(((a - prevA + 3 * Math.PI) % (2 * Math.PI)) - Math.PI);
+    prevA = a;
+    topSpeed = Math.max(topSpeed, Math.hypot(pl.vel.x, pl.vel.z));
+    const tr = pl.trace(pl.pos, { x: pl.pos.x, y: pl.pos.y - 6, z: pl.pos.z });
+    if (tr.fraction < 1 && Math.abs(tr.normal.y - 0.53) < 0.03 && faces.at(-1) !== face) faces.push(face);
+    return { yaw: along[face] + beta, right: 1 };
+  });
+  return { faces, around: (around * 180) / Math.PI, topSpeed, wallruns: events.filter((e) => e.type === 'wallrun').length };
+}
+
+test('megacity: you can surf all the way around the pyramid', () => {
+  const lap = surfPyramid(0.15);
+  assert.ok(new Set(lap.faces).size === 4, `surfed faces ${lap.faces.join('>')}`);
+  assert.ok(lap.around > 250, `only got ${lap.around.toFixed(0)} degrees around`);
+  assert.equal(lap.wallruns, 0, 'stepping off the top should not snag a wallrun');
+  const fast = surfPyramid(0.45); // steeper line down the faces: less lap, more speed
+  assert.ok(fast.topSpeed > 1150, `surf speed ${fast.topSpeed.toFixed(0)}`);
+});

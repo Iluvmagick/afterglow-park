@@ -68,8 +68,10 @@ code that talks to a server, is left out of this build.
     the green glass crown to the very top.
   - **NW**: three glass towers with a sky-ship deck and an infinity pool (the green middle tower is crawlable).
   - **NE**: the golden frame. Fly through its ring and it throws you onto the supertall's sky deck.
-  - **E, the Sail**: a 3600-high curved ice drop. The runout's kicker flings you onto the pyramid.
-  - **SE**: a black glass pyramid to surf, with its own sky beam.
+  - **E, the Sail**: a 3600-high curved ice drop. A golden arch across the end of the runout throws you
+    onto the top of the pyramid.
+  - **SE, the pyramid**: a black glass pyramid with a sky beam and a flat gold top. Step off the top onto a
+    face and hold strafe into it to surf down and around (the faces are too steep to stand on).
   - **S**: a buried colossal Helios head with a golden crown of rays.
   - **SW, the Palm**: a palm island of skateable ice inside a wallrun crescent.
   - **W, the acropolis**: neon-grid plateau with a skateable glass pool, arches with boost rings,

@@ -77,7 +77,7 @@ export const CROUCH = { mins: M.vec(-16, 0, -16), maxs: M.vec(16, 40, 16), eye: 
 const OVERCLIP = 1.001;
 const MIN_WALK_NORMAL = 0.7;
 const ZERO = M.vec();
-const TIMERS = ['coyote', 'jumpBuf', 'slideBoost', 'dash', 'dashCd', 'wallCd', 'sameWall', 'knock', 'mantleCd', 'hook', 'pad'];
+const TIMERS = ['coyote', 'jumpBuf', 'slideBoost', 'dash', 'dashCd', 'wallCd', 'sameWall', 'knock', 'mantleCd', 'hook', 'pad', 'homing'];
 
 export function clipVelocity(v, n, overbounce) {
   let backoff = v.x * n.x + v.y * n.y + v.z * n.z;
@@ -248,6 +248,7 @@ export class Player {
     const mv = this.move;
     this.airJumps = mv.airJumps;
     this.t.coyote = 0;
+    this.t.homing = 0;
     if (this.wall.active) this.endWallRun();
     const impact = Math.max(0, -this.lastAirVelY);
     this.emit('land', { speed: impact });
@@ -358,7 +359,8 @@ export class Player {
   }
 
   airControl(cmd, wishdir, dt) {
-    if (cmd.forward === 0 || cmd.right !== 0 || this.hook.state === 'attached') return;
+    // no steering while a homing ring's arc carries you (holding W would bend it off its target)
+    if (cmd.forward === 0 || cmd.right !== 0 || this.hook.state === 'attached' || this.t.homing > 0) return;
     const speed = M.hlen(this.vel);
     if (speed < 1) return;
     let hx = this.vel.x / speed;

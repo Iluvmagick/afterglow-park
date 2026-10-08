@@ -96,6 +96,7 @@ export class Sim {
             v = { x: (r.target.x - c.x) / T, y: (r.target.y - c.y + 0.5 * r.gravity * T * T) / T, z: (r.target.z - c.z) / T };
           }
           p.launch(v);
+          if (r.target) p.t.homing = r.flightTime;
           r.cd = 0.5;
           this.events.push({ type: 'ring', pos: r.pos });
         }
