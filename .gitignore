@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.trailer-tmp/
+trailer*.mp4
+.claude/
+.DS_Store

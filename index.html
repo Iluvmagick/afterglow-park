@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>AFTERGLOW PARK</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      { "imports": { "three": "./node_modules/three/build/three.module.js" } }
+    </script>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <canvas id="hud"></canvas>
+    <div id="menu">
+      <div class="panel">
+        <h1>AFTERGLOW <span>PARK</span></h1>
+        <p class="tag">a chill movement playground &middot; no enemies, no timer, just vibes</p>
+        <button id="play">CLICK TO PLAY</button>
+        <div class="cols">
+          <div>
+            <h2>CONTROLS</h2>
+            <table>
+              <tr><td>WASD</td><td>move</td></tr>
+              <tr><td>MOUSE</td><td>look</td></tr>
+              <tr><td>SPACE</td><td>jump &middot; hold to bunnyhop &middot; tap in air: double jump</td></tr>
+              <tr><td>SHIFT / C</td><td>crouch &middot; slide when moving fast</td></tr>
+              <tr><td>E / F</td><td>dash</td></tr>
+              <tr><td>RMB / Q</td><td>grappling hook (hold)</td></tr>
+              <tr><td>LMB</td><td>pulse rocket &middot; shoot your feet to rocket jump</td></tr>
+              <tr><td>R (hold)</td><td>back to spawn &middot; hold for 3 seconds</td></tr>
+              <tr><td>M</td><td>music on/off</td></tr>
+              <tr><td>` / F3</td><td>debug + performance overlay</td></tr>
+              <tr><td>ESC</td><td>this menu</td></tr>
+            </table>
+          </div>
+          <div>
+            <h2>SETTINGS</h2>
+            <label>sensitivity <output data-out="sens"></output><input type="range" min="0.3" max="6" step="0.1" data-setting="sens" /></label>
+            <label>field of view <output data-out="fov"></output><input type="range" min="70" max="120" step="1" data-setting="fov" /></label>
+            <label>resolution <output data-out="res"></output><input type="range" min="180" max="480" step="60" data-setting="res" /></label>
+            <label>view distance <output data-out="view"></output><input type="range" min="6000" max="60000" step="2000" data-setting="view" /></label>
+            <label>music <output data-out="music"></output><input type="range" min="0" max="1" step="0.05" data-setting="music" /></label>
+            <label>sound fx <output data-out="sfx"></output><input type="range" min="0" max="1" step="0.05" data-setting="sfx" /></label>
+            <label class="check"><input type="checkbox" data-setting="jitter" /> vertex wobble</label>
+            <label class="check"><input type="checkbox" data-setting="affine" /> wobbly textures (affine warp)</label>
+            <label class="check"><input type="checkbox" data-setting="dither" /> 15-bit dithering</label>
+            <label class="check"><input type="checkbox" data-setting="autohop" /> auto bunnyhop</label>
+            <label class="check"><input type="checkbox" data-setting="speedFov" /> speed widens FOV</label>
+            <label class="check"><input type="checkbox" data-setting="fullscreen" /> fullscreen while playing</label>
+            <button id="reset-orbs" class="small">reset orbs + best speed</button>
+          </div>
+        </div>
+        <div class="tips">
+          <h2>MOVEMENT TIPS</h2>
+          <ul>
+            <li><b>Air strafe:</b> in the air, hold A or D (not W) and turn the mouse the same way smoothly. Chain hops to build speed.</li>
+            <li><b>Slide hop:</b> sprint, hit SHIFT to slide, jump out of it. Downhill slides speed you up.</li>
+            <li><b>Wallrun:</b> jump at a wall at an angle while holding W. Jump again to kick off. Wallruns refresh your double jump.</li>
+            <li><b>Surf:</b> drop onto the pink ramps in the east and hold A/D into the ramp. Do not press W.</li>
+            <li><b>Rocket jump:</b> jump, look down, fire. Shoot walls to blast yourself sideways.</li>
+            <li><b>Surfaces:</b> blue <b>ice</b> has no grip, pink <b>trampolines</b> bounce you (hold SPACE to pump, crouch to land), glowing <b>speed strips</b> fling you, green <b>goo</b> lets you crawl wherever you look.</li>
+            <li><b>The Obelisk</b> (south-east): low gravity, sticky faces, and a ring express that spirals to its halo. Reach the summit.</li>
+            <li><b>The Mega-Parthenon</b> (far west, past the acropolis and the highway) has two relaxed parkour routes: the Peristyle Climb (from the top of the east ramp up to the pediment's peak) and the Naos Run inside (from the north door up to Athena's helmet).</li>
+            <li><b>The megacity</b> surrounds the park: each side of the wall has a greek gateway with speed lanes and a launch pad. Ride the Vaporway, take the Sky Elevator up the supertall (north), drop down the Sail (east). Green glass is crawlable.</li>
+            <li>Collect the golden orbs hidden around the park. Orange pads launch you to the zones.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
