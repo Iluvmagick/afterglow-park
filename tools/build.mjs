@@ -20,6 +20,7 @@ await build({
   format: 'esm',
   minify: true,
   target: 'es2022',
+  define: { 'globalThis.NO_TRAILER': 'true' }, // drop the trailer recorder, the only code that talks to a server
   logLevel: 'warning',
 });
 

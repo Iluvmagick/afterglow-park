@@ -28,7 +28,8 @@ npm run build
 ```
 
 This bundles the game, three.js included, into `dist/`: `index.html`, `style.css` and a minified
-`game.js` (about 670 KB, 190 KB gzipped). Upload those three files.
+`game.js` (about 660 KB, 190 KB gzipped). Upload those three files. The trailer recorder, the only
+code that talks to a server, is left out of this build.
 
 ## Controls
 

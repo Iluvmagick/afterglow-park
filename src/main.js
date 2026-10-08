@@ -512,7 +512,8 @@ window.game = {
 
 if (params.has('autostart')) start(false);
 if (params.has('bench')) setTimeout(() => runBench(Number(params.get('bench')) || 900), 300);
-if (params.has('trailer')) {
+// tools/build.mjs sets NO_TRAILER, so the static build leaves the recorder out entirely
+if (!globalThis.NO_TRAILER && params.has('trailer')) {
   // recording mode (served by tools/record-trailer.mjs): bots perform, frames go to ffmpeg
   benchRunning = true; // keep the realtime loop out of the way
   menu.classList.add('hidden');
