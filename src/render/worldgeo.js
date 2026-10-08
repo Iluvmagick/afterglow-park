@@ -168,15 +168,11 @@ function collectPolygons(brushes) {
     const tint = b.tint || [1, 1, 1];
     const grounded = b.mins.y <= 1;
     for (const f of b.faces) {
-      // skip faces nobody can ever see: underground ones, and the backs of the outer mountain rings
+      // skip faces nobody can ever see: underground ones (everything else gets drawn: guessing which
+      // faces are "never visible" left holes in the mountains where you could see through them)
       let maxY = -Infinity;
       for (const p of f.poly) maxY = Math.max(maxY, p.y);
       if (maxY <= 0.01 && f.n.y < 0.5) continue;
-      if (b.hideOutward && Math.abs(f.n.y) < 0.9) {
-        const c = f.poly[0];
-        const r = Math.hypot(c.x, c.z) || 1;
-        if ((f.n.x * c.x + f.n.z * c.z) / r > 0.3) continue;
-      }
       const name = faceMaterial(b.mat, f.n);
       const def = MATERIALS[name];
       if (!def) throw new Error(`unknown material ${name}`);

@@ -245,7 +245,7 @@ export function buildLevel() {
     sides: Object.fromEntries(Object.entries(GATES).map(([k, g]) => [k, { gaps: [g] }])),
   });
   // far mega-mountains framing the whole megacity
-  cliffRing(16500, 1500, 3500, 7500, 600, 1600, 1600, 2800, [0.7, 0.66, 0.86], { cell: 1024, hideOutward: true }, {
+  cliffRing(16500, 1500, 3500, 7500, 600, 1600, 1600, 2800, [0.7, 0.66, 0.86], { cell: 1024 }, {
     mat: { top: 'megarock', side: 'megacliff' },
   });
 

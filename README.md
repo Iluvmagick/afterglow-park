@@ -126,8 +126,8 @@ Everything is plain ground/wall/surf by steepness, plus four physics materials:
   GPU to finish, so it reports the real cost of a frame (and fps headroom at p95) rather than being
   capped by the display refresh rate. Results also go to the console as JSON (`AFTERGLOW BENCH ...`).
   Run it in a visible, focused tab: background tabs get throttled and report garbage.
-- The world mesh is chunked into 2560-unit tiles so off-screen chunks are frustum-culled, faces nobody
-  can see (underground, backs of the outer mountains) are skipped, and the HUD font draws from a glyph atlas.
+- The world mesh is chunked into 2560-unit tiles so off-screen chunks are frustum-culled, underground
+  faces nobody can see are skipped, and the HUD font draws from a glyph atlas.
 - Megastructures use perspective-correct "mega" materials with coarse mesh cells, so they stay cheap.
 - Anti-flicker: textures are mipmapped (nearest up close, filtered far away), the vertex wobble fades out
   with distance, and translucent effects use real blending instead of dither patterns.
