@@ -4,6 +4,8 @@ A chill PS1-style movement playground. No enemies, no timer: bunnyhop, slide, wa
 grapple and rocket-jump around a sunset park and collect golden orbs if you feel like it.
 It runs entirely in the browser.
 
+**[Play it](https://maximumskull.com/games/afterglow-park/)** (keyboard and mouse).
+
 ![The park from above](docs/park.jpg)
 
 ## Run
