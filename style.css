@@ -74,6 +74,11 @@ h2 {
   margin: 18px 0 8px;
 }
 
+#lock-note {
+  margin: 12px 0 0;
+  color: #ff9a9a;
+}
+
 button {
   font-family: inherit;
   font-weight: 900;

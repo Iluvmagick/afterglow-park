@@ -78,19 +78,37 @@ addEventListener('resize', () => {
 
 // ------------------------------------------------------------------ play / pause
 let playing = false;
+let capturing = false;
 let script = null; // debug: scripted commands instead of live input
+const lockNote = document.getElementById('lock-note');
 function start(withLock = true) {
   audio.init();
   input.enabled = true;
   playing = true;
   menu.classList.add('hidden');
+  lockNote.hidden = true;
   if (withLock) capture();
 }
-// grab the mouse (and the screen, if enabled); both need the click that calls this. The lock goes
-// first: in some browsers requesting fullscreen uses up the click.
+// Grab the mouse (and the screen, if enabled); both need the click that calls this. The lock goes
+// first: in some browsers requesting fullscreen uses up the click. Chrome refuses the mouse for
+// 1.25 s after the player pressed Esc, so a quick "resume" keeps asking until that has passed: the
+// click still counts as permission for a few seconds.
+const LOCK_RETRY_MS = 3000;
 async function capture() {
-  if (!(await input.lock())) {
-    if (playing) pause();
+  if (capturing) return;
+  capturing = true;
+  const t0 = performance.now();
+  let ok = await input.lock();
+  while (!ok && playing && performance.now() - t0 < LOCK_RETRY_MS && navigator.userActivation?.isActive !== false) {
+    await new Promise((r) => setTimeout(r, 200));
+    if (playing) ok = await input.lock();
+  }
+  capturing = false;
+  if (!ok) {
+    if (playing) {
+      pause();
+      lockNote.hidden = false;
+    }
     return;
   }
   if (settings.fullscreen && document.fullscreenEnabled && !document.fullscreenElement) {
@@ -112,9 +130,9 @@ document.addEventListener('visibilitychange', syncAudioFocus);
 document.addEventListener('pointerlockchange', () => {
   if (!document.pointerLockElement && playing && !params.has('nolock')) pause();
 });
-// e.g. clicking "resume" too soon after Esc: Chrome refuses the lock, so show the menu again
+// browsers without promise-based pointer lock only report a refusal with this event
 document.addEventListener('pointerlockerror', () => {
-  if (playing && !input.locking && !params.has('nolock')) pause();
+  if (playing && !capturing && !input.locking && !params.has('nolock')) pause();
 });
 canvas.addEventListener('click', () => {
   if (playing && !input.locked && !params.has('nolock')) capture();
