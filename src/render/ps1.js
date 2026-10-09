@@ -53,7 +53,7 @@ const VERT = /* glsl */ `
   varying vec3 vUvw;
   varying vec2 vUv;
   varying vec3 vCol;
-  varying float vFog;
+  varying vec3 vView;
   void main() {
     vec4 wp = modelMatrix * vec4(position, 1.0);
     vec4 mv = viewMatrix * wp;
@@ -75,7 +75,7 @@ const VERT = /* glsl */ `
     #else
       vCol = light;
     #endif
-    vFog = clamp((length(mv.xyz) - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
+    vView = mv.xyz;
   }
 `;
 
@@ -98,10 +98,12 @@ const FRAG = /* glsl */ `
   uniform float uAffine;
   uniform float uAffineNear;
   uniform float uAffineFar;
+  uniform float uFogNear;
+  uniform float uFogFar;
   varying vec3 vUvw;
   varying vec2 vUv;
   varying vec3 vCol;
-  varying float vFog;
+  varying vec3 vView;
   ${DITHER}
   void main() {
     if (uBlend < 0.5 && uOpacity < 0.999 && bayer(gl_FragCoord.xy) > uOpacity) discard;
@@ -113,7 +115,9 @@ const FRAG = /* glsl */ `
       if (tex.a < 0.5) discard;
     }
     vec3 c = tex.rgb * vCol * uTint;
-    c = mix(c, uFogColor, vFog * uFog);
+    // fog per pixel, not per vertex: big faces (the Poolrooms' floors) would fog wrong otherwise
+    float fog = clamp((length(vView) - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
+    c = mix(c, uFogColor, fog * uFog);
     gl_FragColor = vec4(c, uBlend > 0.5 ? uOpacity : 1.0);
   }
 `;
@@ -223,6 +227,7 @@ export class PS1Post {
         uDither: { value: 1 },
         uLevels: { value: 31 },
         uFlash: { value: 0 },
+        uFlashColor: { value: new THREE.Color(1.0, 0.93, 0.75) },
       },
       depthTest: false,
       depthWrite: false,
@@ -236,12 +241,13 @@ export class PS1Post {
         uniform float uDither;
         uniform float uLevels;
         uniform float uFlash;
+        uniform vec3 uFlashColor;
         varying vec2 vUv;
         ${DITHER}
         void main() {
           vec2 px = floor(vUv * uLowRes);
           vec3 c = texture2D(tScene, (px + 0.5) / uLowRes).rgb;
-          c = mix(c, vec3(1.0, 0.93, 0.75), uFlash);
+          c = mix(c, uFlashColor, uFlash);
           float t = uDither > 0.5 ? bayer(px) : 0.5;
           c = floor(clamp(c, 0.0, 1.0) * uLevels + t) / uLevels;
           gl_FragColor = vec4(c, 1.0);

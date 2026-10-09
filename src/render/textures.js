@@ -541,6 +541,121 @@ function white() {
   return t.done();
 }
 
+// ---------------------------------------------------------------- the Poolrooms
+// One palette for everything down there: white and aqua ceramic, teal trim, turquoise water.
+const POOL_GROUT = '#a9c9c8';
+
+// Square ceramic tiles, 16 px each (4 x 4 per texture), with a glossy top-left edge.
+function ceramic(seed, pal, grout = POOL_GROUT) {
+  return () => {
+    const t = new Tex(seed);
+    const cols = [];
+    for (let i = 0; i < 16; i++) cols.push(t.pick(pal.map(hex)));
+    t.fill((x, y) => {
+      const lx = x % 16;
+      const ly = y % 16;
+      if (lx === 0 || ly === 0) return hex(grout);
+      let f = 1 + (t.rand() - 0.5) * 0.03;
+      if (lx === 1 || ly === 1) f *= 1.06;
+      if (lx === 15 || ly === 15) f *= 0.93;
+      if ((lx === 3 && ly > 2 && ly < 7) || (ly === 3 && lx > 2 && lx < 7)) f *= 1.05; // glaze glint
+      return shade(cols[(y >> 4) * 4 + (x >> 4)], f);
+    });
+    return t.done();
+  };
+}
+
+// The ceiling: small white tiles with a glowing light panel in every repeat.
+function poolceil() {
+  const t = new Tex(51);
+  t.fill((x, y) => {
+    const px = x - 32;
+    const py = y - 32;
+    if (Math.abs(px) < 11 && Math.abs(py) < 11) {
+      if (Math.abs(px) === 10 || Math.abs(py) === 10) return hex('#c8e6e4'); // panel frame
+      return (px + py) & 1 ? hex('#fbfffe') : hex('#f2fffd');
+    }
+    if (x % 8 === 0 || y % 8 === 0) return hex('#b6cfce');
+    return shade(hex('#dfe9e7'), 0.97 + t.rand() * 0.05);
+  });
+  return t.done();
+}
+
+// Clear turquoise with caustic ripples (drawn translucent over the tiles).
+function poolwater() {
+  const t = new Tex(52);
+  const n = t.noise(4);
+  t.fill((x, y) => {
+    const a = Math.sin(x * 0.2 + Math.sin(y * 0.15) * 2.2 + n(x, y) * 4);
+    const b = Math.sin(y * 0.23 + Math.sin(x * 0.18) * 2);
+    const v = a + b;
+    if (v > 1.55) return hex('#f2ffff');
+    if (v > 1.1) return hex('#a8f4f2');
+    return v < -1 ? hex('#2aa6b8') : hex('#52c8d2');
+  });
+  return t.done();
+}
+
+// Springboard: white with a blue non-slip grip pattern.
+function poolboard() {
+  const t = new Tex(53);
+  t.fill((x, y) => {
+    if (y % 32 < 3) return hex('#2a8f9c');
+    return (x + y) % 6 < 2 ? hex('#cfe6ee') : hex('#f4fbff');
+  });
+  return t.done();
+}
+
+// Pool ladder: chrome rungs on teal tile (crawlable, like goo).
+function poolladder() {
+  const t = new Tex(54);
+  t.fill((x, y) => {
+    if (x < 6 || x > 57) return x % 6 === 2 ? hex('#ffffff') : hex('#b9c6cc'); // the rails
+    if (y % 16 < 4) return y % 16 === 1 ? hex('#ffffff') : hex('#a9b8be'); // rungs
+    return (x >> 4) % 2 === (y >> 4) % 2 ? hex('#3fb3b0') : hex('#36a3a1');
+  });
+  return t.done();
+}
+
+// Water-slide fiberglass: glossy pale aqua, no grid (a slide is moulded, not tiled), soft sheen.
+function poolslide() {
+  const t = new Tex(60);
+  const n = t.noise(4);
+  const n2 = t.noise(8);
+  t.fill((x, y) => {
+    const v = n(x, y) * 0.65 + n2(x, y) * 0.35;
+    let c = shade(hex('#b9eef0'), 0.94 + v * 0.12);
+    if (v > 0.68) c = shade(c, 1.07); // wet sheen
+    return c;
+  });
+  for (let i = 0; i < 24; i++) t.set(Math.floor(t.rand() * 64), Math.floor(t.rand() * 64), hex('#f2ffff')); // glints
+  return t.done();
+}
+
+// Launch pad in pool style: a round jet grate, rings of white and aqua.
+function pooljet() {
+  const t = new Tex(59);
+  t.fill((x, y) => {
+    const r = Math.hypot((x % 32) - 15.5, (y % 32) - 15.5);
+    if (r < 3) return hex('#ffffff');
+    return Math.floor(r / 3) % 2 ? hex('#7fe6e6') : hex('#e8fffd');
+  });
+  return t.done();
+}
+
+// Water current: soft white chevrons on aqua (speed strips in pool style).
+function current() {
+  const t = new Tex(55);
+  t.fill((x, y) => {
+    const px = x - 31.5;
+    const py = y - 31.5;
+    const band = (((py - Math.abs(px) * 0.8) % 32) + 32) % 32;
+    if (band < 5) return band < 2 ? hex('#ffffff') : hex('#c4fbf6');
+    return shade(hex('#2fb4c0'), 0.92 + ((x ^ y) & 1) * 0.08);
+  });
+  return t.done();
+}
+
 export const TEXTURES = {
   grass, dirt, tiles, stone, brick, metal, wood, surf, hazard, pad, cliff, rock, crate, checker, slide, bark, pine, white, launcher,
   ice, bounce, goo, obsidian, gold, runes, marble, vaporgrid, water, palm, neon,
@@ -550,6 +665,11 @@ export const TEXTURES = {
   boostS: boost({ x: 0, y: 1 }),
   boostE: boost({ x: 1, y: 0 }),
   boostW: boost({ x: -1, y: 0 }),
+  pooltile: ceramic(50, ['#eef5f3', '#e8f1ef', '#f4f8f6', '#e2eeec']),
+  poolaqua: ceramic(56, ['#9fe0de', '#93d8d7', '#a9e6e2', '#8ad1d2']),
+  pooltrim: ceramic(57, ['#2a8f9c', '#25828f', '#3199a4', '#217987'], '#1a5d66'),
+  poolice: ceramic(58, ['#c4eef2', '#bce8ef', '#cff3f5', '#b4e2ea'], '#8cc4cc'),
+  poolceil, poolwater, poolboard, poolladder, current, pooljet, poolslide,
 };
 
 // World units per texture repeat, lighting, uv mode.
@@ -598,4 +718,18 @@ export const MATERIALS = {
   boostS: { tex: 'boostS', scale: 96, unlit: true, scroll: [0, 1.6] },
   boostE: { tex: 'boostE', scale: 96, unlit: true, scroll: [-1.6, 0] },
   boostW: { tex: 'boostW', scale: 96, unlit: true, scroll: [1.6, 0] },
+  // the Poolrooms: tiles everywhere. The M variants are for huge faces cut into coarse cells.
+  pooltile: { tex: 'pooltile', scale: 128 },
+  pooltileM: { tex: 'pooltile', scale: 128, affine: false },
+  poolaqua: { tex: 'poolaqua', scale: 128 },
+  poolaquaM: { tex: 'poolaqua', scale: 128, affine: false },
+  pooltrim: { tex: 'pooltrim', scale: 64 },
+  pooltrimM: { tex: 'pooltrim', scale: 64, affine: false },
+  poolice: { tex: 'poolice', scale: 128 }, // glossy: you skate on it
+  poolceil: { tex: 'poolceil', scale: 512, unlit: true, affine: false }, // light panels glow
+  poolboard: { tex: 'poolboard', scale: 64 },
+  poolladder: { tex: 'poolladder', scale: 64 },
+  current: { tex: 'current', scale: 96, unlit: true, scroll: [0, -1.2] },
+  pooljet: { tex: 'pooljet', scale: 64, unlit: true },
+  poolslide: { tex: 'poolslide', scale: 256 },
 };

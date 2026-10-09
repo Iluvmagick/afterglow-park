@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import { MATERIALS } from './textures.js';
 import { pineTiers, PINE_SIDES } from '../level.js';
+import { POOL } from '../poolrooms.js';
 
 const CELL = 128;
 const WELD = 256; // vertex positions are welded to a 1/256 unit grid
@@ -22,6 +23,23 @@ function faceMaterial(mat, n) {
   if (n.y > 0.7) return mat.top ?? mat.side;
   if (n.y < -0.7) return mat.bottom ?? mat.side;
   return mat.side;
+}
+
+// Faces nobody can ever see, so they're never drawn: faces with the material 'none', and faces
+// buried in the ground. The ground is a "crust" between the park (y 0) and the Poolrooms' ceiling
+// (y POOL.ceil); the crust's own faces are always drawn (its underside is the Poolrooms' ceiling,
+// its sides line the shaft down and the world's edge). Everything else gets drawn: guessing which
+// faces are "never visible" once left holes in the mountains you could see through.
+export function faceHidden(b, f) {
+  if (faceMaterial(b.mat, f.n) === 'none') return true;
+  if (b.crust) return false;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const p of f.poly) {
+    minY = Math.min(minY, p.y);
+    maxY = Math.max(maxY, p.y);
+  }
+  return maxY <= 0.01 && minY >= POOL.ceil - 0.01 && f.n.y < 0.5;
 }
 
 function basis(n) {
@@ -113,12 +131,13 @@ export function buildBrushGeometry(brushes) {
   weldVertices(polys);
   fixTJunctions(polys);
   // Bucket by material AND by spatial tile, so each mesh has a tight bounding sphere and
-  // three.js can frustum-cull whatever is behind you or off to the side.
+  // three.js can frustum-cull whatever is behind you or off to the side. The Poolrooms ('under')
+  // get meshes of their own, so the renderer can skip a whole world while you're in the other.
   const builders = new Map();
   for (const poly of polys) {
     const c0 = poly.verts[0].p;
-    const key = `${poly.name}|${Math.floor(c0.x / TILE)}|${Math.floor(c0.z / TILE)}`;
-    if (!builders.has(key)) builders.set(key, { name: poly.name, gb: new GeoBuilder() });
+    const key = `${poly.name}|${poly.layer}|${Math.floor(c0.x / TILE)}|${Math.floor(c0.z / TILE)}`;
+    if (!builders.has(key)) builders.set(key, { name: poly.name, layer: poly.layer, gb: new GeoBuilder() });
     const gb = builders.get(key).gb;
     const vs = poly.verts;
     if (!poly.split) {
@@ -145,20 +164,21 @@ export function buildBrushGeometry(brushes) {
   // tiny chunks aren't worth a draw call each: fold them into one leftover mesh per material
   const out = [];
   const leftovers = new Map();
-  for (const { name, gb } of builders.values()) {
+  for (const { name, layer, gb } of builders.values()) {
     if (gb.pos.length / 9 >= MIN_CHUNK_TRIS) {
-      out.push({ name, geometry: gb.build() });
+      out.push({ name, layer, geometry: gb.build() });
       continue;
     }
-    if (!leftovers.has(name)) leftovers.set(name, new GeoBuilder());
-    const lo = leftovers.get(name);
-    lo.pos.push(...gb.pos);
-    lo.nrm.push(...gb.nrm);
-    lo.uv.push(...gb.uv);
-    lo.col.push(...gb.col);
+    const key = `${name}|${layer}`;
+    if (!leftovers.has(key)) leftovers.set(key, { name, layer, gb: new GeoBuilder() });
+    const lo = leftovers.get(key).gb;
+    for (let i = 0; i < gb.pos.length; i++) lo.pos.push(gb.pos[i]);
+    for (let i = 0; i < gb.nrm.length; i++) lo.nrm.push(gb.nrm[i]);
+    for (let i = 0; i < gb.uv.length; i++) lo.uv.push(gb.uv[i]);
+    for (let i = 0; i < gb.col.length; i++) lo.col.push(gb.col[i]);
   }
-  for (const [name, gb] of leftovers) out.push({ name, geometry: gb.build() });
-  return out; // [{ name, geometry }], several chunks per material
+  for (const { name, layer, gb } of leftovers.values()) out.push({ name, layer, geometry: gb.build() });
+  return out; // [{ name, layer: 'over' | 'under', geometry }], several chunks per material
 }
 
 function collectPolygons(brushes) {
@@ -166,19 +186,25 @@ function collectPolygons(brushes) {
   for (const b of brushes) {
     if (b.invisible) continue;
     const tint = b.tint || [1, 1, 1];
-    const grounded = b.mins.y <= 1;
+    // shade the feet of walls standing on the park's ground or on the Poolrooms' floor
+    const grounded = b.mins.y <= 1 && (b.mins.y > POOL.ceil || b.mins.y <= POOL.floor + 1);
     for (const f of b.faces) {
-      // skip faces nobody can ever see: underground ones (everything else gets drawn: guessing which
-      // faces are "never visible" left holes in the mountains where you could see through them)
+      if (faceHidden(b, f)) continue;
       let maxY = -Infinity;
       for (const p of f.poly) maxY = Math.max(maxY, p.y);
-      if (maxY <= 0.01 && f.n.y < 0.5) continue;
+      const layer = maxY <= POOL.ceil + 0.01 ? 'under' : 'over';
       const name = faceMaterial(b.mat, f.n);
       const def = MATERIALS[name];
       if (!def) throw new Error(`unknown material ${name}`);
-      // speed strips: on flat tops the texture's "up" follows the push direction, so the chevrons point the right way
+      // speed strips: on flat tops the texture's "up" follows the push direction, so the chevrons point the right way.
+      // uvFromAbove: the texture is projected straight down onto the tops (curved surfaces made of many
+      // small faces, like the slide, would otherwise show a seam at every face)
       const [tu, tv] =
-        b.boostDir && Math.abs(f.n.y) > 0.999 ? [{ x: -b.boostDir.z, y: 0, z: b.boostDir.x }, b.boostDir] : basis(f.n);
+        b.boostDir && Math.abs(f.n.y) > 0.999
+          ? [{ x: -b.boostDir.z, y: 0, z: b.boostDir.x }, b.boostDir]
+          : b.uvFromAbove && f.n.y > 0.5
+            ? basis(UP)
+            : basis(f.n);
       let u0 = 0;
       let v0 = 0;
       let su = def.scale;
@@ -214,7 +240,7 @@ function collectPolygons(brushes) {
             c: [tint[0] * shadeF, tint[1] * shadeF, tint[2] * shadeF],
           };
         });
-        polys.push({ name, n: f.n, verts, split: false });
+        polys.push({ name, layer, n: f.n, verts, split: false });
       }
     }
   }

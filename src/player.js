@@ -70,6 +70,14 @@ export const MOVE = {
   stickySpeed: 380,
   stickyGravity: 40,
   stickyMaxTime: 12,
+  // water (the Poolrooms): deeper than swimDepth you swim
+  swimDepth: 40,
+  swimSpeed: 300,
+  swimAccel: 4,
+  swimDrag: 2.2, // water resistance (1/s)
+  swimFloat: 44, // idle, you bob with your feet this deep
+  waterJump: 330, // jump at the surface to hop out
+  waterGravity: 0.3, // walking on the bottom of a pool
 };
 
 export const STAND = { mins: M.vec(-16, 0, -16), maxs: M.vec(16, 72, 16), eye: 64 };
@@ -124,6 +132,8 @@ export class Player {
     this.contacts = [];
     this.groundBrush = null;
     this.gravityScale = 1; // set by the sim (low-gravity zones)
+    this.waterDepth = 0; // set by the sim: how deep the feet are under water
+    this.wasSwimming = false;
     this.viewSmooth = 0;
     this.lastAirVelY = 0;
     this.jumpedThisTick = false;
@@ -135,7 +145,10 @@ export class Player {
     return this.crouched ? CROUCH : STAND;
   }
   get gravity() {
-    return this.move.gravity * this.gravityScale;
+    return this.move.gravity * this.gravityScale * (this.swimming ? this.move.waterGravity : 1);
+  }
+  get swimming() {
+    return this.waterDepth > this.move.swimDepth;
   }
   get surface() {
     return this.groundBrush ? this.groundBrush.phys || null : null;
@@ -184,16 +197,23 @@ export class Player {
     if (dashPressed && this.t.dashCd <= 0) this.startDash(cmd);
     if (this.t.dash > 0 && (jumpPressed || (this.onGround && cmd.jump && mv.autoHop))) this.t.dash = 0;
 
+    const swimming = this.swimming && !this.onGround;
+    if (swimming && !this.wasSwimming) this.emit('swim');
+    this.wasSwimming = swimming;
+    if (swimming && this.wall.active) this.endWallRun();
+    if (swimming) this.airJumps = mv.airJumps;
+
     if (this.t.dash > 0) this.dashMove(dt);
     else if (this.wall.active) this.wallRunMove(cmd, dt, jumpPressed, crouchPressed);
     else if (this.onGround) this.walkMove(cmd, dt, jumpPressed, crouchPressed);
+    else if (swimming) this.swimMove(cmd, dt);
     else this.airMove(cmd, dt, jumpPressed);
 
     this.groundTrace();
     if (this.onGround) {
       if (this.wall.active) this.endWallRun();
     } else if (!this.wall.active && this.t.dash <= 0) {
-      this.tryWallRun(cmd);
+      if (!swimming) this.tryWallRun(cmd);
       if (!this.wall.active) this.tryMantle(cmd);
     }
 
@@ -279,7 +299,7 @@ export class Player {
   updateDuck(cmd) {
     if (cmd.crouch && !this.crouched) {
       const eyeBefore = this.pos.y + STAND.eye;
-      if (!this.onGround) {
+      if (!this.onGround && !this.swimming) {
         // tuck the legs up so the head stays put (crouch-jump)
         const up = { x: this.pos.x, y: this.pos.y + (STAND.maxs.y - CROUCH.maxs.y), z: this.pos.z };
         if (this.world.boxFree(up, CROUCH.mins, CROUCH.maxs)) this.pos = up;
@@ -488,6 +508,32 @@ export class Player {
     }
     this.lastAirVelY = this.vel.y - this.gravity * dt;
     this.slideMove(true, dt);
+  }
+
+  // Swimming: W goes where you look, SPACE swims up, crouch dives. The water slows you down, idle you
+  // float up to bob at the surface, and SPACE at the surface hops you out (onto the side if you're
+  // facing it: the mantle takes over from there).
+  swimMove(cmd, dt) {
+    const mv = this.move;
+    if (cmd.jump && this.waterDepth < mv.swimDepth + 20 && this.vel.y > -100) {
+      this.vel = { x: this.vel.x, y: Math.max(this.vel.y, mv.waterJump), z: this.vel.z };
+      this.t.jumpBuf = 0;
+      this.emit('waterJump');
+    } else {
+      this.vel = M.scale(this.vel, Math.exp(-mv.swimDrag * dt));
+      const look = M.viewDir(this.yaw, this.pitch);
+      const w = M.madd(M.scale(look, cmd.forward), M.rightH(this.yaw), cmd.right);
+      w.y += (cmd.jump ? 1 : 0) - (cmd.crouch ? 1 : 0);
+      const wl = M.length(w);
+      if (wl > 1e-3) this.accelerate(M.scale(w, 1 / wl), mv.swimSpeed, mv.swimAccel, dt);
+      if (!cmd.jump && !cmd.crouch && !(cmd.forward && Math.abs(this.pitch) > 0.3)) {
+        // buoyancy: drift toward floating chest-deep at the surface
+        const want = M.clamp((this.waterDepth - mv.swimFloat) * 3, -120, 90);
+        this.vel = { x: this.vel.x, y: this.vel.y + (want - this.vel.y) * Math.min(1, dt * 2), z: this.vel.z };
+      }
+    }
+    this.lastAirVelY = this.vel.y;
+    this.slideMove(false, dt);
   }
 
   // Standing (or walking) onto a trampoline launches you.

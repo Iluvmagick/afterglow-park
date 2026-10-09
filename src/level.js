@@ -2,10 +2,13 @@
 // Zones: central plaza + spire (north of spawn), wallrun gauntlet (north), surf ramps (east),
 // slide mountain (south), parkour blocks + tower (west), floating sky islands everywhere,
 // an ice bowl, a trampoline yard with goo pillars, speed strips, and THE OBELISK (south-east).
+// Around the park: the megacity (megacity.js, parthenon.js). Under it all: the Poolrooms
+// (poolrooms.js), reached only by the piers beyond the far mountains.
 import { createBrush } from './brush.js';
 import { mulberry32 } from './math.js';
 import { buildMegacity } from './megacity.js';
 import { buildMegaParthenon } from './parthenon.js';
+import { buildPoolrooms, buildPiers } from './poolrooms.js';
 
 const GRAVITY = 800;
 
@@ -106,8 +109,8 @@ export function buildLevel() {
       mat,
       extra,
     );
-  const pad = (x, y, z, target, apex, r = 56) => {
-    cylinder(x, z, r, y, y + 8, 10, { top: 'pad', side: 'hazard' });
+  const pad = (x, y, z, target, apex, r = 56, style) => {
+    cylinder(x, z, r, y, y + 8, 10, style === 'pool' ? { top: 'pooljet', side: 'pooltrim', bottom: 'none' } : { top: 'pad', side: 'hazard' });
     const from = { x, y: y + 8, z };
     pads.push({
       pos: from,
@@ -116,6 +119,7 @@ export function buildLevel() {
       launch: launchVelocity(from, target, apex),
       target,
       radius: r,
+      style,
     });
   };
   const orb = (x, y, z) => orbs.push({ pos: { x, y, z } });
@@ -195,7 +199,9 @@ export function buildLevel() {
       // (ax, az): direction along the side, (nx, nz): outward normal
       const so = (opts.sides && opts.sides[name]) || {};
       const dI = so.dIn ?? dIn;
-      const dOut = dI + depth;
+      // The sides overlap at the corners. East and west stop 1 unit short (outer face and ends), so no face
+      // lies in the same plane as another side's face there (they'd flicker against each other).
+      const dOut = dI + depth - (name === 'E' || name === 'W' ? 1 : 0);
       const hLo = so.hMin ?? hMin;
       const hHi = so.hMax ?? hMax;
       const [sA, sB] = so.sRange ?? [-dOut, dOut];
@@ -581,8 +587,8 @@ export function buildLevel() {
   const PINK = [1, 0.84, 0.94];
   const CYAN = [0.84, 0.97, 1];
   // the pass: speed lanes through the canyon (west lane goes out, east lane brings you home)
-  strip(VX - 20, -250, -4100, -70, 8, 'W', 1200);
-  strip(VX - 20, 70, -4100, 250, 8, 'E', 1200);
+  strip(VX, -250, -4100, -70, 8, 'W', 1200); // (up to the plateau's edge: overlapping, their tops would flicker)
+  strip(VX, 70, -4100, 250, 8, 'E', 1200);
   // greek gateway on the park side
   for (const gz of [-340, 340]) {
     cylinder(-3990, gz, 42, 0, 620, 10, 'marble', { tint: PINK });
@@ -782,6 +788,13 @@ export function buildLevel() {
   const mega = buildMegacity({ add, box, obox, cylinder, wedge, pad, orb, target, ring, tiltedColumn, ellipsoid, decor, PINK, CYAN });
   const parthenon = buildMegaParthenon({ add, box, cylinder, pad, orb, tiltedColumn, ellipsoid, PINK, CYAN });
 
+  // ---------------------------------------------------------------- under everything: the Poolrooms
+  // Sealed off; the only ways in are the piers beyond the far mountains.
+  const pool = buildPoolrooms({ add, box, cylinder, wedge, pad, orb, target, ring });
+  const piers = buildPiers({ add, box, orb }, pool.arrivals);
+  pool.portals.push(...piers.portals);
+  pool.piers = piers;
+
   // ---------------------------------------------------------------- trees (trunks collide)
   const treeSpots = [];
   for (let i = 0; i < 70; i++) {
@@ -826,11 +839,12 @@ export function buildLevel() {
     orbs,
     targets,
     decor,
-    gravityZones: [{ x: O.x, z: O.z, r: 1100, scale: OB_GRAV }],
+    gravityZones: [{ x: O.x, z: O.z, r: 1100, scale: OB_GRAV, y0: -300 }], // (not in the Poolrooms below)
     vapor: { minX: VX, parkHalf: 4600 }, // everything outside the park square is the megacity
     mega,
     parthenon,
-    beams: [{ x: O.x, y: OB.tip, z: O.z, kind: 'obelisk' }, ...mega.beams],
+    pool,
+    beams: [{ x: O.x, y: OB.tip, z: O.z, kind: 'obelisk' }, ...mega.beams, ...piers.beams],
     obelisk: { x: O.x, z: O.z, base: OB.base, top: OB.top, tip: OB.tip, hb: OB.hb, ht: OB.ht, halo: HALO, summitY: 2580, summitR: 450 },
     spawn: { pos: { x: 0, y: 16, z: 560 }, yaw: 0 },
   };

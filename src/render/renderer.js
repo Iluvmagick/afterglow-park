@@ -15,6 +15,18 @@ const ORB_COLORS = [
   [1, 0.7, 0.2],
   [1, 1, 0.75],
 ];
+// The light and the haze: the sunset world above, the Poolrooms (pale aqua haze, soft even light
+// from the ceiling panels) and under their water.
+const ATMOS = {
+  world: { fog: FOG_COLOR, sun: shared.uSunColor.value.toArray(), ambTop: shared.uAmbTop.value.toArray(), ambBottom: shared.uAmbBottom.value.toArray() },
+  under: { fog: [0.8, 0.93, 0.94], near: 250, far: 6500, sun: [0.2, 0.22, 0.22], ambTop: [0.9, 0.97, 1], ambBottom: [0.68, 0.8, 0.84] },
+  underwater: { fog: [0.12, 0.45, 0.52], near: 0, far: 1100, sun: [0.1, 0.16, 0.16], ambTop: [0.65, 0.88, 0.92], ambBottom: [0.4, 0.62, 0.68] },
+};
+const SPLASH_COLORS = [
+  [0.85, 1, 1],
+  [1, 1, 1],
+  [0.55, 0.9, 0.95],
+];
 const BOOM_COLORS = [
   [1, 0.85, 0.4],
   [1, 0.55, 0.15],
@@ -69,6 +81,8 @@ export class GameRenderer {
     this.buildWorld();
     this.buildEntities();
     this.buildObelisk();
+    this.buildPoolrooms();
+    this.atmosphere = null;
     this.awakeShown = false;
     this.flash = 0;
 
@@ -88,10 +102,14 @@ export class GameRenderer {
   }
 
   buildWorld() {
-    for (const { name, geometry } of buildBrushGeometry(this.sim.level.brushes)) {
+    // the world above and the Poolrooms below are drawn one at a time (see setAtmosphere)
+    this.overMeshes = [];
+    this.underMeshes = [];
+    for (const { name, layer, geometry } of buildBrushGeometry(this.sim.level.brushes)) {
       const m = new THREE.Mesh(geometry, this.materials[name]);
       m.matrixAutoUpdate = false;
       this.scene.add(m);
+      (layer === 'under' ? this.underMeshes : this.overMeshes).push(m);
     }
     const trees = new THREE.Mesh(buildTreeGeometry(this.sim.level.decor), this.materials.pine);
     trees.matrixAutoUpdate = false;
@@ -100,6 +118,7 @@ export class GameRenderer {
     const palms = new THREE.Mesh(buildPalmGeometry(this.sim.level.decor), palmMat);
     palms.matrixAutoUpdate = false;
     this.scene.add(palms);
+    this.overMeshes.push(trees, palms);
 
   }
 
@@ -137,6 +156,7 @@ export class GameRenderer {
       obelisk: ps1Material({ lit: false, tint: [0.85, 0.55, 1], vertexColors: false }),
       elevator: ps1Material({ lit: false, tint: [1, 0.45, 0.85], vertexColors: false }),
       mega: ps1Material({ lit: false, tint: [1, 0.85, 0.35], vertexColors: false }),
+      bubble: ps1Material({ lit: false, tint: [0.85, 1, 1], vertexColors: false }),
     };
     this.ringMeshes = sim.rings.map((r) => {
       const g = new THREE.Group();
@@ -223,17 +243,103 @@ export class GameRenderer {
     this.beamMat = ps1Material({ lit: false, fog: false, vertexColors: false, side: THREE.DoubleSide, opacity: 0.3, tint: [0.5, 1, 1], blend: true });
     this.beamCoreMat = ps1Material({ lit: false, fog: false, vertexColors: false, side: THREE.DoubleSide, opacity: 0.7, tint: [0.85, 1, 1], blend: true });
     const pyrMat = ps1Material({ lit: false, fog: false, vertexColors: false, side: THREE.DoubleSide, opacity: 0.35, tint: [1, 0.5, 0.9], blend: true });
+    // the piers' beams only show once you're out at the far mountains (see setAtmosphere)
+    this.pierBeamMat = ps1Material({ lit: false, fog: false, vertexColors: false, side: THREE.DoubleSide, opacity: 0, tint: [0.75, 1, 1], blend: true });
+    this.skyBeams = [];
     for (const b of this.sim.level.beams || []) {
-      const mats = b.kind === 'obelisk' ? [[90, this.beamMat], [26, this.beamCoreMat]] : [[140, pyrMat]];
+      const mats = b.kind === 'obelisk' ? [[90, this.beamMat], [26, this.beamCoreMat]] : b.kind === 'pool' ? [[170, this.pierBeamMat]] : [[140, pyrMat]];
       for (const [w, mat] of mats) {
         for (const rot of [0, Math.PI / 2]) {
           const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, 12000, 1, 24), mat);
           plane.position.set(b.x, b.y + 6000, b.z);
           plane.rotation.y = rot;
           this.scene.add(plane);
+          this.skyBeams.push(plane);
         }
       }
     }
+  }
+
+  // The Poolrooms: the water over everything down there and in the piers' pools, and the piers' glowing
+  // doorways.
+  buildPoolrooms() {
+    const pool = this.sim.level.pool;
+    if (!pool) return;
+    const sheet = (rects, y, cell) => {
+      const pos = [];
+      const uv = [];
+      for (const [x0, z0, x1, z1] of rects) {
+        for (let x = x0; x < x1; x += cell) {
+          for (let z = z0; z < z1; z += cell) {
+            const xb = Math.min(x1, x + cell);
+            const zb = Math.min(z1, z + cell);
+            for (const [px, pz] of [
+              [x, z],
+              [x, zb],
+              [xb, zb],
+              [x, z],
+              [xb, zb],
+              [xb, z],
+            ]) {
+              pos.push(px, y, pz);
+              uv.push(px / 256, pz / 256);
+            }
+          }
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.computeBoundingSphere();
+      return g;
+    };
+    const water = (tint, opacity) =>
+      ps1Material({ map: this.textures.poolwater, lit: false, vertexColors: false, side: THREE.DoubleSide, blend: true, opacity, tint, uvScroll: [0.03, 0.017], overrides: { uAffine: { value: 0 } } });
+    const flood = new THREE.Mesh(sheet(pool.waterRects, pool.water, 1024), water([0.85, 1, 1], 0.32));
+    this.scene.add(flood);
+    this.underMeshes.push(flood);
+    const pierWater = water([0.55, 0.95, 1], 0.8);
+    for (const w of pool.piers.water) {
+      const m = new THREE.Mesh(sheet([w.rect], w.y, 128), pierWater);
+      this.scene.add(m);
+      this.overMeshes.push(m);
+    }
+    // light fills the doorways (a pane inside the wall, so the arch frames it)
+    const glowMat = ps1Material({ lit: false, side: THREE.DoubleSide, blend: true, opacity: 0.65 });
+    for (const g of pool.piers.glows) {
+      const P = (sv, y) => (g.alongX ? [sv, y, g.c] : [g.c, y, sv]);
+      const lo = [0.95, 1, 1];
+      const hi = [0.55, 0.9, 1];
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute([...P(g.s0, g.y0), ...P(g.s1, g.y0), ...P(g.s1, g.y1), ...P(g.s0, g.y0), ...P(g.s1, g.y1), ...P(g.s0, g.y1)], 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute([...lo, ...lo, ...hi, ...lo, ...hi, ...hi], 3));
+      const m = new THREE.Mesh(geo, glowMat);
+      this.scene.add(m);
+      this.overMeshes.push(m);
+    }
+  }
+
+  // 'world' (the park and the megacity), 'outside' (out past the edge, where you can see the Poolrooms'
+  // box under the world), 'under' (in the Poolrooms) or 'underwater' (in a pool down there). The world
+  // you're not in isn't drawn.
+  setAtmosphere(mode) {
+    this.atmosphere = mode;
+    const A = ATMOS[mode === 'outside' ? 'world' : mode];
+    const view = this.settings.view;
+    const far = A.far ? Math.min(view, A.far) : view;
+    shared.uFogColor.value.setRGB(...A.fog);
+    shared.uSunColor.value.setRGB(...A.sun);
+    shared.uAmbTop.value.setRGB(...A.ambTop);
+    shared.uAmbBottom.value.setRGB(...A.ambBottom);
+    // view distance: how far the haze reaches (6000 is the classic PS1 murk); keep a light haze
+    shared.uFogFar.value = far;
+    shared.uFogNear.value = A.near ?? far * (far <= 8000 ? 0.14 : 0.06);
+    this.camera.far = far * 1.1 + 1500;
+    this.camera.updateProjectionMatrix();
+    const under = mode === 'under' || mode === 'underwater';
+    for (const m of this.overMeshes || []) m.visible = !under;
+    for (const m of this.underMeshes || []) m.visible = mode !== 'world';
+    for (const m of this.skyBeams || []) m.visible = !under;
   }
 
   resize() {
@@ -257,10 +363,7 @@ export class GameRenderer {
 
   applySettings(s) {
     Object.assign(this.settings, s);
-    // view distance: how far the haze reaches (6000 is the classic PS1 murk)
-    shared.uFogFar.value = this.settings.view;
-    shared.uFogNear.value = this.settings.view * (this.settings.view <= 8000 ? 0.14 : 0.06); // keep a light haze
-    this.camera.far = this.settings.view * 1.1 + 1500;
+    this.setAtmosphere(this.atmosphere || 'world');
     shared.uSnap.value = this.settings.jitter ? (this.settings.lowHeight > 300 ? 2 : 1) : 0;
     shared.uAffine.value = this.settings.affine ? 1 : 0;
     this.post.material.uniforms.uDither.value = this.settings.dither ? 1 : 0;
@@ -349,7 +452,24 @@ export class GameRenderer {
           this.fovKick = Math.max(this.fovKick, 6);
         }
         break;
+      case 'splash': {
+        const k = Math.min(1, e.speed / 1500);
+        P.burst(e.pos, 8 + Math.floor(k * 50), { speed: 120 + k * 380, life: 0.9, size: 7, colors: SPLASH_COLORS, grav: 700, up: 160 + k * 420, drag: 1.2 });
+        break;
+      }
+      case 'waterJump': {
+        const p = this.sim.player.pos;
+        P.burst({ x: p.x, y: this.sim.level.pool.water, z: p.z }, 14, { speed: 140, life: 0.6, size: 6, colors: SPLASH_COLORS, grav: 600, up: 160, drag: 1.5 });
+        break;
+      }
+      case 'noclip':
+      case 'wake':
+        this.flash = 1;
+        this.post.material.uniforms.uFlashColor.value.setRGB(...(e.type === 'noclip' ? [0.85, 1, 1] : [1, 0.93, 0.75]));
+        this.fovKick = Math.max(this.fovKick, 14);
+        break;
       case 'ascend':
+        this.post.material.uniforms.uFlashColor.value.setRGB(1, 0.93, 0.75);
         P.burst(e.pos, 160, { speed: 900, life: 1.8, size: 12, colors: [[1, 0.85, 0.35], [1, 1, 0.8], [0.5, 1, 1]], grav: 40, drag: 1.2 });
         P.burst(e.pos, 60, { speed: 300, life: 2.5, size: 18, colors: [[1, 0.9, 0.5]], grav: -60, drag: 0.8 });
         this.fovKick = Math.max(this.fovKick, 16);
@@ -408,6 +528,21 @@ export class GameRenderer {
     this.camera.rotation.set(look.pitch, look.yaw, this.roll);
     this.camera.updateMatrixWorld();
 
+    // which world is the camera in?
+    const pool = sim.level.pool;
+    let mode = 'world';
+    if (pool) {
+      const c = this.camera.position;
+      const beyond = Math.max(Math.abs(c.x), Math.abs(c.z));
+      if (c.y < pool.ceil && beyond < pool.half + 64) mode = c.y < pool.water ? 'underwater' : 'under';
+      else if (beyond > 18000) mode = 'outside';
+      // the piers' beams show once you're up on the far mountains (their foot is at 16500)
+      const beam = 0.32 * M.clamp((beyond - 16800) / 1000, 0, 1);
+      this.pierBeamMat.uniforms.uOpacity.value = beam;
+      this.pierBeamMat.visible = beam > 0.001;
+    }
+    if (mode !== this.atmosphere) this.setAtmosphere(mode);
+
     // viewmodel
     let dYaw = look.yaw - this.lastYaw;
     if (dYaw > Math.PI) dYaw -= Math.PI * 2;
@@ -428,9 +563,15 @@ export class GameRenderer {
     // passes: sky -> world -> viewmodel into the low-res target, then upscale + dither
     const r = this.renderer;
     r.setRenderTarget(this.post.rt);
-    r.clear(true, true, true);
-    r.render(this.sky.scene, this.sky.camera);
-    r.clearDepth();
+    if (mode === 'under' || mode === 'underwater') {
+      r.setClearColor(shared.uFogColor.value, 1); // no sky down there: just the haze
+      r.clear(true, true, true);
+    } else {
+      r.setClearColor(0x000000, 1);
+      r.clear(true, true, true);
+      r.render(this.sky.scene, this.sky.camera);
+      r.clearDepth();
+    }
     r.render(this.scene, this.camera);
     r.clearDepth();
     r.render(this.view.scene, this.view.camera);
@@ -467,7 +608,7 @@ export class GameRenderer {
       if (Math.random() < dt * 8) {
         const a = Math.random() * Math.PI * 2;
         const rr = Math.random() * pad.radius;
-        this.particles.spawn(pad.pos.x + Math.cos(a) * rr, pad.pos.y + 2, pad.pos.z + Math.sin(a) * rr, 0, 140 + Math.random() * 100, 0, 0.7, 5, [1, 0.75, 0.3], 0, 0);
+        this.particles.spawn(pad.pos.x + Math.cos(a) * rr, pad.pos.y + 2, pad.pos.z + Math.sin(a) * rr, 0, 140 + Math.random() * 100, 0, 0.7, 5, pad.style === 'pool' ? [0.8, 1, 1] : [1, 0.75, 0.3], 0, 0);
       }
     }
 
@@ -564,6 +705,19 @@ export class GameRenderer {
       const pp = sim.player.pos;
       for (let k = 0; k < 2; k++) {
         this.particles.spawn(pp.x + (Math.random() - 0.5) * 24, pp.y + 10 + Math.random() * 40, pp.z + (Math.random() - 0.5) * 24, 0, 20, 0, 0.6, 6, Math.random() < 0.5 ? [1, 0.85, 0.35] : [1, 1, 0.75], 0, 0);
+      }
+    }
+
+    // water: splashes round your feet as you wade, bubbles when you're under
+    const pool = sim.level.pool;
+    if (pool && p.waterDepth > 0) {
+      const hs = M.hlen(p.vel);
+      if (p.waterDepth < 40 && p.onGround && hs > 120 && Math.random() < dt * hs * 0.04) {
+        this.particles.spawn(p.pos.x + (Math.random() - 0.5) * 30, pool.water + 1, p.pos.z + (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 60, 90 + Math.random() * 90, (Math.random() - 0.5) * 60, 0.45, 5, SPLASH_COLORS[Math.floor(Math.random() * 3)], 500, 1);
+      }
+      if (this.atmosphere === 'underwater' && Math.random() < dt * 10) {
+        const e = sim.eye;
+        this.particles.spawn(e.x + (Math.random() - 0.5) * 60, e.y - 10 - Math.random() * 30, e.z + (Math.random() - 0.5) * 60, 0, 60 + Math.random() * 60, 0, 1.5, 4, [0.85, 1, 1], -20, 0.5);
       }
     }
 

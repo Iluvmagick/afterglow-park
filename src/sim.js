@@ -50,8 +50,20 @@ export class Sim {
     const prevCenter = p.center();
     this.prevEye = this.eye;
     p.gravityScale = this.gravityAt(p.pos);
+    const depthBefore = this.waterDepthAt(p.pos);
+    p.waterDepth = depthBefore;
     p.tick(cmd, DT);
     for (const e of p.events) this.events.push(e);
+    // hitting the water: a splash, and deep water eats most of a big fall (the shallows don't slow you)
+    const depth = this.waterDepthAt(p.pos);
+    if (depth > 0 && depthBefore <= 0) {
+      const speed = -p.vel.y;
+      const h = p.hull;
+      if (speed > 400 && this.world.trace(p.pos, { x: p.pos.x, y: p.pos.y - 120, z: p.pos.z }, h.mins, h.maxs).fraction === 1) {
+        p.vel = { x: p.vel.x, y: p.vel.y * 0.45, z: p.vel.z };
+      }
+      if (speed > 120) this.events.push({ type: 'splash', pos: { x: p.pos.x, y: this.level.pool.water, z: p.pos.z }, speed });
+    }
 
     // weapon
     this.fireCd = Math.max(0, this.fireCd - DT);
@@ -76,6 +88,7 @@ export class Sim {
       if (r.cd > 0) continue;
       const d0 = M.dot(M.sub(prevCenter, r.pos), r.axis);
       const d1 = M.dot(M.sub(pc, r.pos), r.axis);
+      if (r.oneWay && !(d0 <= 0 && d1 > 0)) continue; // only along its axis (falling back through does nothing)
       if ((d0 <= 0 && d1 > 0) || (d0 >= 0 && d1 < 0)) {
         const t = d0 / (d0 - d1);
         const hit = M.lerp(prevCenter, pc, t);
@@ -122,7 +135,9 @@ export class Sim {
     }
 
     this.checkSummit();
-    if (p.pos.y < KILL_Y) this.respawn();
+    this.checkPortals();
+    // fell out of the world (the Poolrooms are a sealed box below it, so falls in there are fine)
+    if (p.pos.y < KILL_Y && !this.inPoolrooms(p.pos)) this.respawn();
     this.stats.topSpeed = Math.max(this.stats.topSpeed, M.hlen(p.vel));
     const e = p.eye();
     e.y += p.viewSmooth;
@@ -131,14 +146,57 @@ export class Sim {
     this.ticks++;
   }
 
-  // Low-gravity fields (the obelisk). Fades in over the outer 150 units.
+  // Low-gravity fields (the obelisk). Fades in over the outer 150 units; y0: nothing below it.
   gravityAt(pos) {
     let gs = 1;
     for (const z of this.level.gravityZones || []) {
+      if (z.y0 !== undefined && pos.y < z.y0) continue;
       const k = M.clamp((z.r - Math.hypot(pos.x - z.x, pos.z - z.z)) / 150, 0, 1);
       gs = Math.min(gs, 1 + (z.scale - 1) * k);
     }
     return gs;
+  }
+
+  // The Poolrooms: a sealed box under the world, flooded up to pool.water.
+  inPoolrooms(pos) {
+    const w = this.level.pool;
+    return !!w && Math.abs(pos.x) < w.half && Math.abs(pos.z) < w.half && pos.y < w.ceil + 1 && pos.y > w.floor - 1000;
+  }
+
+  // How deep the feet are under water (0 when dry).
+  waterDepthAt(pos) {
+    const w = this.level.pool;
+    if (!w || pos.y >= w.water || pos.y < w.floor - 1000) return 0;
+    for (const [x0, z0, x1, z1] of w.waterRects) if (pos.x > x0 && pos.x < x1 && pos.z > z0 && pos.z < z1) return w.water - pos.y;
+    return 0;
+  }
+
+  // Portals: the piers' pools and doorways drop you into the Poolrooms (out of the ceiling of a hall),
+  // and the drain down there wakes you up back in the park.
+  checkPortals() {
+    const p = this.player;
+    const h = p.hull;
+    for (const pt of this.level.pool?.portals || []) {
+      const lo = M.add(p.pos, h.mins);
+      const hi = M.add(p.pos, h.maxs);
+      if (hi.x < pt.mins.x || lo.x > pt.maxs.x || hi.y < pt.mins.y || lo.y > pt.maxs.y || hi.z < pt.mins.z || lo.z > pt.maxs.z) continue;
+      if (pt.wake) {
+        this.respawn();
+        this.events.push({ type: 'wake' });
+        return;
+      }
+      p.pos = { x: pt.to.x, y: pt.to.y, z: pt.to.z };
+      p.vel = { x: 0, y: Math.min(0, p.vel.y), z: 0 };
+      p.onGround = false;
+      p.groundNormal = null;
+      p.groundBrush = null;
+      if (p.wall.active) p.endWallRun();
+      if (p.hook.state !== 'none') p.hook = { ...p.hook, state: 'none' };
+      this.eye = p.eye();
+      this.prevEye = this.eye; // don't smear the camera across the map
+      this.events.push({ type: 'noclip', side: pt.side, pos: { ...pt.to } });
+      return;
+    }
   }
 
   checkSummit() {

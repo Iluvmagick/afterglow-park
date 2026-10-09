@@ -16,7 +16,7 @@ export class GameAudio {
   // then `clock` stands in for the current time and music is scheduled by calling tickMusic().
   init(offlineCtx = null) {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended' && !this.offline) this.ctx.resume();
+      this.setActive(true); // (called from a click: we're in focus)
       return;
     }
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -27,7 +27,7 @@ export class GameAudio {
     this.master = ctx.createGain();
     this.master.gain.value = 1.3;
     // gentle lowpass for a softer, retro sampler feel
-    const lp = ctx.createBiquadFilter();
+    const lp = (this.masterLP = ctx.createBiquadFilter());
     lp.type = 'lowpass';
     lp.frequency.value = 11000;
     this.master.connect(lp).connect(ctx.destination);
@@ -64,12 +64,13 @@ export class GameAudio {
     this.wind = this.noiseLoop('lowpass', 400, 0.7);
     this.slideLoop = this.noiseLoop('bandpass', 900, 2.5);
     this.skateLoop = this.noiseLoop('highpass', 3500, 0.8);
+    this.lapping = this.noiseLoop('lowpass', 420, 0.7); // water lapping in the Poolrooms
+    this.place = 'world';
     this.hum = this.drone();
     this.music = new Music(this);
     if (!this.offline) this.music.start();
   }
 
-  // Silence everything while the tab is hidden or unfocused; pick up again on return.
   now() {
     return this.offline ? this.clock : this.ctx.currentTime;
   }
@@ -78,10 +79,24 @@ export class GameAudio {
     if (this.music) this.music.schedule();
   }
 
+  // Silence everything while the tab is hidden or unfocused; pick up again on return. suspend() and
+  // resume() take a moment and the context's state only changes once they're done, so deciding from
+  // that state after a quick blur + focus (going fullscreen does that) left the sound off while you
+  // played, or on while you were away. Instead: remember what we want, and keep at it until it holds.
   setActive(active) {
-    if (!this.ctx || this.offline) return;
-    if (active && this.ctx.state === 'suspended') this.ctx.resume();
-    else if (!active && this.ctx.state === 'running') this.ctx.suspend();
+    this.wantActive = active;
+    if (!this.ctx || this.offline || this.syncing) return;
+    this.syncing = true;
+    let tries = 0;
+    const step = () => {
+      const want = this.wantActive ? 'running' : 'suspended';
+      if (this.ctx.state === want || this.ctx.state === 'closed' || tries++ > 4) {
+        this.syncing = false;
+        return;
+      }
+      (this.wantActive ? this.ctx.resume() : this.ctx.suspend()).then(step, () => (this.syncing = false));
+    };
+    step();
   }
 
   noiseLoop(type, freq, q) {
@@ -300,7 +315,39 @@ export class GameAudio {
         break;
       case 'step':
         break;
+      case 'splash': {
+        const k = Math.min(1, e.speed / 1500);
+        this.noise(0.25 + k * 0.5, 0.1 + k * 0.35, 'bandpass', 1800 + k * 1500, 300, { q: 0.8, verb: true });
+        this.tone('sine', 140, 50, 0.2 + k * 0.2, 0.05 + k * 0.2);
+        break;
+      }
+      case 'waterJump':
+        this.noise(0.25, 0.12, 'bandpass', 2200, 500, { q: 1 });
+        break;
+      case 'noclip':
+        // reality slips: a downward sweep into a big wet room
+        this.tone('sawtooth', 900, 40, 1.1, 0.06, { verb: true });
+        this.noise(1.4, 0.18, 'lowpass', 6000, 200, { verb: true });
+        [69, 76, 81].forEach((n, i) => this.tone('triangle', mtof(n), mtof(n), 1.6, 0.05, { delay: 0.25 + i * 0.12, attack: 0.2, verb: true }));
+        break;
+      case 'wake':
+        [81, 76, 72, 69].forEach((n, i) => this.tone('triangle', mtof(n), mtof(n), 1.2, 0.06, { delay: i * 0.1, attack: 0.05, verb: true }));
+        break;
     }
+  }
+
+  // in the Poolrooms the music plays "in another room": muffled, with a big wet echo; under water
+  // everything is muffled
+  setPlace(place) {
+    if (place === this.place) return;
+    this.place = place;
+    const t = this.now();
+    const music = { world: 20000, under: 900, underwater: 380 }[place];
+    this.music.lp.frequency.setTargetAtTime(music, t, 0.15);
+    this.music.verbSend.gain.setTargetAtTime(place === 'world' ? 1 : 2, t, 0.3);
+    this.masterLP.frequency.setTargetAtTime(place === 'underwater' ? 650 : 11000, t, 0.05);
+    this.lapping.g.gain.setTargetAtTime(place === 'under' ? 0.05 : place === 'underwater' ? 0.14 : 0, t, 0.4);
+    this.lapping.f.frequency.setTargetAtTime(place === 'underwater' ? 220 : 420, t, 0.2);
   }
 
   step(bright = 1) {
@@ -308,11 +355,12 @@ export class GameAudio {
     this.noise(0.05, 0.07, 'bandpass', f, f * 0.6, { q: 1.8 });
   }
 
-  update(dt, sim) {
+  update(dt, sim, paused = false) {
     if (!this.ctx) return;
     const p = sim.player;
-    const hs = Math.hypot(p.vel.x, p.vel.z);
-    const sp = Math.hypot(hs, p.vel.y);
+    // paused (the menu): the world stands still, so no wind or scraping (the music plays on)
+    const hs = paused ? 0 : Math.hypot(p.vel.x, p.vel.z);
+    const sp = paused ? 0 : Math.hypot(hs, p.vel.y);
     const t = this.now();
     const windVol = Math.min(1, Math.max(0, (sp - 260) / 1300)) * (p.onGround ? 0.18 : 0.32);
     this.wind.g.gain.setTargetAtTime(windVol, t, 0.15);
@@ -322,7 +370,18 @@ export class GameAudio {
     const onIce = p.onGround && p.surface === 'ice';
     this.skateLoop.g.gain.setTargetAtTime(onIce ? Math.min(0.09, hs / 4000) : 0, t, 0.08);
     // past the walls the music goes "slowed + reverb"
-    if (this.music && sim.level.vapor) this.music.vapor = Math.max(Math.abs(p.pos.x), Math.abs(p.pos.z)) > sim.level.vapor.parkHalf;
+    if (this.music && sim.level.vapor) this.music.vapor = p.pos.y > -300 && Math.max(Math.abs(p.pos.x), Math.abs(p.pos.z)) > sim.level.vapor.parkHalf;
+    // the Poolrooms: muffled music, lapping water and the odd drip echoing round the halls
+    const pool = sim.level.pool;
+    if (pool && this.music) {
+      const eye = sim.eye;
+      const inside = sim.inPoolrooms(p.pos);
+      this.setPlace(inside ? (eye.y < pool.water ? 'underwater' : 'under') : 'world');
+      if (inside && Math.random() < dt * 0.5) {
+        const f = 1300 + Math.random() * 1500;
+        this.tone('sine', f, f * 0.55, 0.16, 0.02 + Math.random() * 0.02, { verb: true });
+      }
+    }
     const ob = sim.level.obelisk;
     if (ob) {
       const d = Math.hypot(p.pos.x - ob.x, p.pos.z - ob.z);
@@ -331,13 +390,14 @@ export class GameAudio {
     }
     this.slideLoop.f.frequency.setTargetAtTime(500 + hs * 0.8, t, 0.1);
 
-    // footsteps from distance travelled (skates glide silently on ice)
+    // footsteps from distance travelled (skates glide silently on ice); splashy in the shallows
     if ((p.onGround && !p.sliding && p.surface !== 'ice') || p.wall.active) {
       this.stepDist += hs * dt;
       const stride = p.wall.active ? 95 : 125;
       if (this.stepDist > stride) {
         this.stepDist = 0;
-        if (hs > 60) this.step(p.wall.active ? 1.3 : 1);
+        if (hs > 60 && p.waterDepth > 0 && !p.wall.active) this.noise(0.12, 0.09, 'bandpass', 1600 + Math.random() * 600, 500, { q: 1.2 });
+        else if (hs > 60) this.step(p.wall.active ? 1.3 : 1);
       }
     } else this.stepDist = 100;
   }
@@ -349,8 +409,13 @@ class Music {
     const ctx = audio.ctx;
     this.out = ctx.createGain();
     this.out.gain.value = 1.4;
-    this.out.connect(audio.musicBus);
-    this.out.connect(audio.reverb);
+    this.lp = ctx.createBiquadFilter(); // closes down in the Poolrooms (see GameAudio.setPlace)
+    this.lp.type = 'lowpass';
+    this.lp.frequency.value = 20000;
+    this.verbSend = ctx.createGain();
+    this.out.connect(this.lp);
+    this.lp.connect(audio.musicBus);
+    this.lp.connect(this.verbSend).connect(audio.reverb);
     this.delay = ctx.createDelay(2);
     this.delay.delayTime.value = 0.42;
     const fb = ctx.createGain();

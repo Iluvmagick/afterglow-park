@@ -127,6 +127,7 @@ const syncAudioFocus = () => audio.setActive(document.visibilityState === 'visib
 addEventListener('blur', syncAudioFocus);
 addEventListener('focus', syncAudioFocus);
 document.addEventListener('visibilitychange', syncAudioFocus);
+setInterval(syncAudioFocus, 1000); // and check now and then, in case an event never came
 document.addEventListener('pointerlockchange', () => {
   if (!document.pointerLockElement && playing && !params.has('nolock')) pause();
 });
@@ -182,6 +183,22 @@ function onEvent(e) {
       break;
     case 'target':
       hud.toast('TARGET POP!', '#ff9a9a', 1);
+      break;
+    case 'noclip':
+      if (!firsts.has('noclip')) {
+        firsts.add('noclip');
+        hud.toast('YOU NOCLIPPED OUT OF REALITY', '#c8fff8', 4);
+      }
+      hud.toast('T H E   P O O L R O O M S', '#7af0e6', 3.5);
+      break;
+    case 'wake':
+      hud.toast('...AND WOKE UP IN THE PARK', '#ffe27a', 3);
+      break;
+    case 'swim':
+      if (!firsts.has('swim')) {
+        firsts.add('swim');
+        hud.toast('SWIM! SPACE: UP  CROUCH: DOWN', '#7af0e6', 2.5);
+      }
       break;
     case 'ascend':
       if (e.count === 1) {
@@ -249,7 +266,7 @@ function frame(now) {
   hud.respawn = respawnHeld >= 0 ? respawnHeld / RESPAWN_HOLD : 0;
   // zone welcome
   const vapor = sim.level.vapor;
-  const inVapor = vapor && Math.max(Math.abs(sim.player.pos.x), Math.abs(sim.player.pos.z)) > vapor.parkHalf;
+  const inVapor = vapor && sim.player.pos.y > -300 && Math.max(Math.abs(sim.player.pos.x), Math.abs(sim.player.pos.z)) > vapor.parkHalf;
   if (inVapor && !wasInVapor) hud.toast('A E S T H E T I C', '#ff71ce', 2.5);
   wasInVapor = inVapor;
   for (const e of sim.drainEvents()) onEvent(e);
@@ -257,12 +274,13 @@ function frame(now) {
   perf.add('sim', tRender - tSim);
   renderer.renderer.info.reset();
   perf.gpuBegin();
-  renderer.render(playing ? acc / DT : 1, dt, { yaw: input.yaw, pitch: input.pitch });
+  // paused: draw the frame with no time passing, so the gun, the camera and the effects hold still
+  renderer.render(playing ? acc / DT : 1, playing ? dt : 0, { yaw: input.yaw, pitch: input.pitch });
   perf.gpuEnd();
   perf.poll();
   const tHud = performance.now();
   perf.add('render', tHud - tRender);
-  audio.update(dt, sim);
+  audio.update(dt, sim, !playing);
   fpsAcc += dt;
   fpsN++;
   if (fpsAcc > 0.5) {
@@ -309,6 +327,15 @@ const BENCH_PATH = [
   [-14200, 700, -2600, Math.PI, 0.1],
   [-12900, 1900, 600, 0.3, -0.25],
   [0, 2500, 0, 0.8, -0.6],
+  [0, 7000, -17600, 0, -0.2], // over the far mountains: the north pier
+  [0, 600, -20600, 0, -0.1],
+  // the Poolrooms
+  [0, -1100, 1200, 0, -0.15],
+  [-1600, -1000, -1600, 0.8, -0.1],
+  [2600, -1300, -1400, 2.4, 0.05],
+  [2600, -1500, 2000, Math.PI, 0],
+  [0, -1300, 6500, Math.PI, 0],
+  [-2600, -1200, 0, 0, 0.1],
 ];
 async function runBench(frames = 900) {
   benchRunning = true;

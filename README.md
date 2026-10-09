@@ -28,7 +28,7 @@ npm run build
 ```
 
 This bundles the game, three.js included, into `dist/`: `index.html`, `style.css` and a minified
-`game.js` (about 660 KB, 190 KB gzipped). Upload those three files. The trailer recorder, the only
+`game.js` (about 690 KB, 195 KB gzipped). Upload those three files. The trailer recorder, the only
 code that talks to a server, is left out of this build.
 
 ## Controls
@@ -36,8 +36,8 @@ code that talks to a server, is left out of this build.
 | Key | Action |
 | --- | --- |
 | WASD | move |
-| Space | jump: hold to bunnyhop, tap in the air to double jump (also mouse wheel) |
-| Shift / C | crouch: slide when moving fast; crouch in the air to tuck your legs |
+| Space | jump: hold to bunnyhop, tap in the air to double jump (also mouse wheel); in deep water, swim up |
+| Shift / C | crouch: slide when moving fast; crouch in the air to tuck your legs; in deep water, dive |
 | E / F (or middle mouse) | dash |
 | Right mouse / Q (hold) | grappling hook |
 | Left mouse | pulse rocket: shoot your feet to rocket jump |
@@ -83,6 +83,31 @@ code that talks to a server, is left out of this build.
     Walk there from the acropolis (under the highway) or take the launch pad behind the acropolis.
 - Orange pads launch you between zones.
 
+## Under the world (spoilers)
+
+Climb over the far mountains (the wall round the whole megacity) and look out: on each compass axis
+a pale beam rises from a tiled pier running out over the void to a pool deck with a giant glowing
+doorway. Dive into the pool (it has no bottom) or walk through the door and you noclip out of
+reality into **THE POOLROOMS**, sealed off under the world. The piers are the only ways in: fall off
+the edge anywhere else and you still respawn.
+
+One aesthetic down there: white and aqua ceramic tile, ankle-deep water everywhere, a tiled ceiling
+of soft light panels, a pale aqua haze, and the music playing muffled "in another room". Deep water is
+swimmable: W swims where you look, Space swims up (and hops you out at the surface), crouch dives; idle,
+you float.
+
+Nine tall halls joined by arched doorways (north at the top), and the pier you came in by decides the
+hall you fall into:
+
+| | | |
+| --- | --- | --- |
+| **NW: the Drained Pool**: an empty bowl of slippery tile on a plinth, to skate | **N: the Wave Pool**: three tiled waves rising out of a deep pool, surf them from the platform | **NE: the Helter-Skelter**: a banked slide spiralling down a tiled tower into a splash pool (crouch to slide) |
+| **W: the Wallrun Baths**: walls standing in a deep channel; in through the south doorway (there's a kicker) and wall to wall to the north end | **C: the Natatorium**: a lap pool between colonnades, bleachers, and the Bubble Line (a current from the west doorway into a loop of rings under the ceiling that drops you in the deep end) | **E: the Diving Hall**: crawl the ladder up the tower, a high board and two springboards over a deep pool |
+| **SW: the Drain**: the way out. Dive to the grate and you wake up in the park | **S: the Steps**: a square pool sunk into the floor with steps going down under the water, and stepping stones to an island with a jet (hold Space to pump up to the ceiling) | **SE: the Maze**: a low-ceilinged warren of tiled partitions |
+
+Beyond the colonnade round the halls: a forest of pillars in the fog, with a lone doorway, a
+springboard, a staircase up to nothing and a lifeguard chair out along the four axes.
+
 ## Parkour routes
 
 Untimed, just for fun:
@@ -110,7 +135,9 @@ Everything is plain ground/wall/surf by steepness, plus four physics materials:
 - `src/player.js`: Quake 3 / Source style movement (accel, friction, air strafing, slide-move
   collision with stair stepping) plus slide, wallrun, wall jump, double jump, dash, mantle and grapple.
 - `src/collision.js` + `src/brush.js`: convex brushes and swept-box traces (port of Q3's box-vs-brush clip, with exact bevel planes).
-- `src/sim.js`: fixed 125 Hz deterministic simulation (rockets, pads, rings, orbs). No DOM, so it runs in Node.
+- `src/sim.js`: fixed 125 Hz deterministic simulation (rockets, pads, rings, orbs, water, portals). No DOM, so it runs in Node.
+- `src/level.js`, `src/megacity.js`, `src/parthenon.js`, `src/poolrooms.js`: the map, built from brushes in code. The
+  ground is a "crust" between the park and the Poolrooms below; its underside is their ceiling.
 - `src/render/`: three.js with custom PS1 shaders: low-res render target (360p by default), vertex snapping (wobble), affine texture
   mapping (faded to perspective-correct right next to the camera so close-up floors don't smear), Gouraud lighting, fog, and a 15-bit ordered-dither upscale pass. All textures are generated procedurally.
 - `src/audio.js`: all sound synthesized with WebAudio, including a generative ambient soundtrack.
@@ -127,7 +154,8 @@ Everything is plain ground/wall/surf by steepness, plus four physics materials:
   capped by the display refresh rate. Results also go to the console as JSON (`AFTERGLOW BENCH ...`).
   Run it in a visible, focused tab: background tabs get throttled and report garbage.
 - The world mesh is chunked into 2560-unit tiles so off-screen chunks are frustum-culled, underground
-  faces nobody can see are skipped, and the HUD font draws from a glyph atlas.
+  faces nobody can see are skipped, and the HUD font draws from a glyph atlas. The world above and the
+  Poolrooms below are never drawn at the same time.
 - Megastructures use perspective-correct "mega" materials with coarse mesh cells, so they stay cheap.
 - Anti-flicker: textures are mipmapped (nearest up close, filtered far away), the vertex wobble fades out
   with distance, and translucent effects use real blending instead of dither patterns.
@@ -149,7 +177,11 @@ Headless physics tests: traces, stairs, slopes, bhop speed gain, surfing, slides
 dash, mantle, grapple, rocket jump, all four surface materials, every jump pad landing on its target,
 bot runs through the zones (all 16 Obelisk Express rings to the summit, crawling the obelisk, the
 beanstalk, the runway, the ice bowl), and a 4-minute random-input fuzz run that checks the player
-never ends up inside geometry.
+never ends up inside geometry. The Poolrooms have their own (`test/poolrooms.test.mjs`): every pier and
+doorway drops you into a hall, falling off the edge anywhere else still respawns you (the piers are the
+only ways in), swimming, the drain, a bot run through each hall's set piece, that no two faces down there
+flicker against each other, and a fuzz run that checks you never get stuck or out. `test/audio.test.mjs`
+checks the sound follows focus however quickly it comes and goes.
 
 Debug URL flags: `?autostart` (skip the menu), `?nolock` (no pointer lock or fullscreen), `?timerloop` (drive frames
 with timers so hidden tabs keep simulating), `?res=480`, `?bench` (benchmark). In the console, `game.bot(policy)` runs a
