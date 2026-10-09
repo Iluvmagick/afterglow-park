@@ -28,8 +28,15 @@ npm run build
 ```
 
 This bundles the game, three.js included, into `dist/`: `index.html`, `style.css` and a minified
-`game.js` (about 690 KB, 195 KB gzipped). Upload those three files. The trailer recorder, the only
+`game.js` (about 560 KB, 170 KB gzipped; three.js's shaders for its built-in materials are left out,
+the game draws everything with its own). Upload those three files. The trailer recorder, the only
 code that talks to a server, is left out of this build.
+
+For Apache hosts (like the blog's) the build also writes `game.js.br`, game.js compressed with
+Brotli at its highest level (140 KB), and a `.htaccess` that serves it to browsers that accept Brotli
+and makes browsers check for updates on every visit. Copy the dot file too (`cp -R dist/. <target>`):
+a whole first visit is then about 148 KB, a revisit a few "not modified" replies. Other hosts ignore
+both files.
 
 ## Controls
 
