@@ -1,9 +1,16 @@
 // Turns brushes into PS1-ish meshes: world-aligned UVs, faces chopped on a grid so the affine
 // texture warp stays in the charming-but-readable range, and baked vertex color variation.
 //
-// The mesh is made watertight like Quake's map compiler did: vertices are welded, and any vertex
-// that lies on another polygon's edge (a "T-junction") is inserted into that edge. Otherwise the
-// PS1 vertex snapping opens hairline cracks along those seams that sparkle, worst in the distance.
+// Only the surface of the solid world gets drawn, the way Quake's map compiler did it ("CSG"): every
+// face is cut by the brushes it touches, and the pieces inside another brush, or pressed flat
+// against one, are dropped. Otherwise overlapping brushes leave buried faces a unit or two behind
+// the visible ones, and once those are far enough away for the depth buffer to stop telling them
+// apart, they flicker through (z-fighting). So brushes may overlap freely, at any height; the tests
+// check that no two faces left are too close to tell apart (test/mesh.test.mjs).
+//
+// The mesh is also made watertight, again like Quake's: vertices are welded, and any vertex that
+// lies on another polygon's edge (a "T-junction") is inserted into that edge. Otherwise the PS1
+// vertex snapping opens hairline cracks along those seams that sparkle, worst in the distance.
 import * as THREE from 'three';
 import { MATERIALS } from './textures.js';
 import { pineTiers, PINE_SIDES } from '../level.js';
@@ -28,8 +35,9 @@ function faceMaterial(mat, n) {
 // Faces nobody can ever see, so they're never drawn: faces with the material 'none', and faces
 // buried in the ground. The ground is a "crust" between the park (y 0) and the Poolrooms' ceiling
 // (y POOL.ceil); the crust's own faces are always drawn (its underside is the Poolrooms' ceiling,
-// its sides line the shaft down and the world's edge). Everything else gets drawn: guessing which
-// faces are "never visible" once left holes in the mountains you could see through.
+// its sides line the shaft down and the world's edge). Everything else gets drawn, minus the parts
+// other brushes bury (see carveFaces): guessing which faces are "never visible" once left holes in
+// the mountains you could see through.
 export function faceHidden(b, f) {
   if (faceMaterial(b.mat, f.n) === 'none') return true;
   if (b.crust) return false;
@@ -40,6 +48,144 @@ export function faceHidden(b, f) {
     maxY = Math.max(maxY, p.y);
   }
   return maxY <= 0.01 && minY >= POOL.ceil - 0.01 && f.n.y < 0.5;
+}
+
+const ON = 0.05; // a polygon this close to a plane is in it
+const SPLIT = 0.001; // splitting a polygon, a vertex this close to the plane goes to both sides
+const BROAD = 512; // broadphase grid for carving
+
+// Splits convex poly by the plane (n, d) into the part behind it and the part in front of it.
+// (Not with ON: for a plane at a shallow angle to the polygon, that's a wide band, and the two
+// parts would overlap across it.)
+function splitPoly(poly, n, d) {
+  const behind = [];
+  const ahead = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const da = dot(a, n) - d;
+    const db = dot(b, n) - d;
+    if (da <= SPLIT) behind.push(a);
+    if (da >= -SPLIT) ahead.push(a);
+    if ((da < -SPLIT && db > SPLIT) || (da > SPLIT && db < -SPLIT)) {
+      // interpolate from a canonical endpoint so neighbours sharing this edge get the same bits
+      const [p0, p1, d0, d1] = lexLess(a, b) ? [a, b, da, db] : [b, a, db, da];
+      const t = d0 / (d0 - d1);
+      const p = { x: p0.x + (p1.x - p0.x) * t, y: p0.y + (p1.y - p0.y) * t, z: p0.z + (p1.z - p0.z) * t };
+      behind.push(p);
+      ahead.push(p);
+    }
+  }
+  return [behind, ahead];
+}
+
+// The pieces of convex poly (in a plane facing fn) that are outside brush b. A piece lying in one of
+// b's own faces is pressed against b if it faces the other way (hidden), and duplicates that face if
+// it faces the same way: then only one of the two may stay, the one that `wins` (but never a face
+// that isn't drawn, which would leave a hole).
+function outsideBrush(poly, fn, b, wins) {
+  const out = [];
+  let inside = poly;
+  for (const g of b.faces) {
+    const { n, d } = g;
+    let front = false;
+    let back = false;
+    for (const p of inside) {
+      const s = dot(p, n) - d;
+      if (s > ON) front = true;
+      else if (s < -ON) back = true;
+    }
+    if (!front && !back) {
+      if (dot(fn, n) > 0 && (wins || faceHidden(b, g))) {
+        out.push(inside);
+        return out;
+      }
+      continue;
+    }
+    if (!back) {
+      out.push(inside);
+      return out;
+    }
+    if (!front) continue;
+    const [behind, ahead] = splitPoly(inside, n, d);
+    if (ahead.length >= 3) out.push(ahead);
+    inside = behind;
+    if (inside.length < 3) return out;
+  }
+  return out; // what's left is inside b
+}
+
+// The drawn pieces of every drawn face: [{ b, f, tu, tv, pieces }]. Each face is cut into cells along
+// its texture axes tu/tv, then each cell is cut by every other drawn brush that touches it
+// (collision-only brushes don't hide anything), so pieces are convex polygons in f's plane no bigger
+// than a cell. Where two brushes have a face in the same plane facing the same way, the later
+// brush's face is drawn.
+export function carveFaces(brushes) {
+  const solid = brushes.filter((b) => !b.invisible);
+  const index = new Map(solid.map((b, i) => [b, i]));
+  const grid = new Map();
+  const cells = (lo, hi, fn) => {
+    for (let x = Math.floor(lo.x / BROAD); x <= Math.floor(hi.x / BROAD); x++)
+      for (let z = Math.floor(lo.z / BROAD); z <= Math.floor(hi.z / BROAD); z++) fn((x + 1024) * 2048 + z + 1024);
+  };
+  for (const b of solid) {
+    cells(b.mins, b.maxs, (k) => {
+      if (!grid.has(k)) grid.set(k, []);
+      grid.get(k).push(b);
+    });
+  }
+  const bounds = (poly) => {
+    const lo = { x: Infinity, y: Infinity, z: Infinity };
+    const hi = { x: -Infinity, y: -Infinity, z: -Infinity };
+    for (const p of poly) {
+      lo.x = Math.min(lo.x, p.x - ON);
+      lo.y = Math.min(lo.y, p.y - ON);
+      lo.z = Math.min(lo.z, p.z - ON);
+      hi.x = Math.max(hi.x, p.x + ON);
+      hi.y = Math.max(hi.y, p.y + ON);
+      hi.z = Math.max(hi.z, p.z + ON);
+    }
+    return [lo, hi];
+  };
+  const touches = (o, [lo, hi]) => o.mins.x <= hi.x && o.maxs.x >= lo.x && o.mins.y <= hi.y && o.maxs.y >= lo.y && o.mins.z <= hi.z && o.maxs.z >= lo.z;
+  const out = [];
+  for (const b of solid) {
+    for (const f of b.faces) {
+      if (faceHidden(b, f)) continue;
+      const box = bounds(f.poly);
+      const near = new Set();
+      cells(...box, (k) => {
+        for (const o of grid.get(k) || []) if (o !== b && touches(o, box)) near.add(o);
+      });
+      const [tu, tv] = faceAxes(b, f);
+      const cell = b.cell || CELL; // far-away scenery can use coarser cells
+      let pieces = splitAxis(splitAxis([f.poly], tu, cell), tv, cell);
+      if (near.size) {
+        pieces = pieces.flatMap((piece) => {
+          const pb = bounds(piece);
+          let kept = [piece];
+          for (const o of near) {
+            if (!touches(o, pb)) continue;
+            const wins = index.get(b) > index.get(o);
+            kept = kept.flatMap((poly) => outsideBrush(poly, f.n, o, wins));
+            if (!kept.length) break;
+          }
+          return kept;
+        });
+      }
+      if (pieces.length) out.push({ b, f, tu, tv, pieces });
+    }
+  }
+  return out;
+}
+
+// A face's texture axes, which are also the axes its cells are cut along.
+function faceAxes(b, f) {
+  // speed strips: on flat tops the texture's "up" follows the push direction, so the chevrons point the right way.
+  // uvFromAbove: the texture is projected straight down onto the tops (curved surfaces made of many
+  // small faces, like the slide, would otherwise show a seam at every face)
+  if (b.boostDir && Math.abs(f.n.y) > 0.999) return [{ x: -b.boostDir.z, y: 0, z: b.boostDir.x }, b.boostDir];
+  return b.uvFromAbove && f.n.y > 0.5 ? basis(UP) : basis(f.n);
 }
 
 function basis(n) {
@@ -183,65 +329,50 @@ export function buildBrushGeometry(brushes) {
 
 function collectPolygons(brushes) {
   const polys = [];
-  for (const b of brushes) {
-    if (b.invisible) continue;
+  for (const { b, f, tu, tv, pieces } of carveFaces(brushes)) {
     const tint = b.tint || [1, 1, 1];
     // shade the feet of walls standing on the park's ground or on the Poolrooms' floor
     const grounded = b.mins.y <= 1 && (b.mins.y > POOL.ceil || b.mins.y <= POOL.floor + 1);
-    for (const f of b.faces) {
-      if (faceHidden(b, f)) continue;
-      let maxY = -Infinity;
-      for (const p of f.poly) maxY = Math.max(maxY, p.y);
-      const layer = maxY <= POOL.ceil + 0.01 ? 'under' : 'over';
-      const name = faceMaterial(b.mat, f.n);
-      const def = MATERIALS[name];
-      if (!def) throw new Error(`unknown material ${name}`);
-      // speed strips: on flat tops the texture's "up" follows the push direction, so the chevrons point the right way.
-      // uvFromAbove: the texture is projected straight down onto the tops (curved surfaces made of many
-      // small faces, like the slide, would otherwise show a seam at every face)
-      const [tu, tv] =
-        b.boostDir && Math.abs(f.n.y) > 0.999
-          ? [{ x: -b.boostDir.z, y: 0, z: b.boostDir.x }, b.boostDir]
-          : b.uvFromAbove && f.n.y > 0.5
-            ? basis(UP)
-            : basis(f.n);
-      let u0 = 0;
-      let v0 = 0;
-      let su = def.scale;
-      let sv = def.scale;
-      if (def.fit) {
-        let ulo = Infinity;
-        let uhi = -Infinity;
-        let vlo = Infinity;
-        let vhi = -Infinity;
-        for (const p of f.poly) {
-          ulo = Math.min(ulo, dot(p, tu));
-          uhi = Math.max(uhi, dot(p, tu));
-          vlo = Math.min(vlo, dot(p, tv));
-          vhi = Math.max(vhi, dot(p, tv));
-        }
-        u0 = ulo;
-        v0 = vlo;
-        su = Math.max(1, uhi - ulo);
-        sv = Math.max(1, vhi - vlo);
+    let maxY = -Infinity;
+    for (const p of f.poly) maxY = Math.max(maxY, p.y);
+    const layer = maxY <= POOL.ceil + 0.01 ? 'under' : 'over';
+    const name = faceMaterial(b.mat, f.n);
+    const def = MATERIALS[name];
+    if (!def) throw new Error(`unknown material ${name}`);
+    let u0 = 0;
+    let v0 = 0;
+    let su = def.scale;
+    let sv = def.scale;
+    if (def.fit) {
+      let ulo = Infinity;
+      let uhi = -Infinity;
+      let vlo = Infinity;
+      let vhi = -Infinity;
+      for (const p of f.poly) {
+        ulo = Math.min(ulo, dot(p, tu));
+        uhi = Math.max(uhi, dot(p, tu));
+        vlo = Math.min(vlo, dot(p, tv));
+        vhi = Math.max(vhi, dot(p, tv));
       }
-      const cell = b.cell || CELL; // far-away scenery can use coarser cells
-      const pieces = splitAxis(splitAxis([f.poly], tu, cell), tv, cell);
-      const sideFace = Math.abs(f.n.y) < 0.7;
-      for (const poly of pieces) {
-        const verts = poly.map((p) => {
-          let shadeF = 0.92 + hash3(p.x, p.y, p.z) * 0.16;
-          if (grounded && sideFace) shadeF *= 0.7 + 0.3 * Math.min(1, (p.y - b.mins.y) / 110);
-          if (f.n.y < -0.7) shadeF *= 0.75;
-          return {
-            p,
-            u: (dot(p, tu) - u0) / su,
-            v: (dot(p, tv) - v0) / sv,
-            c: [tint[0] * shadeF, tint[1] * shadeF, tint[2] * shadeF],
-          };
-        });
-        polys.push({ name, layer, n: f.n, verts, split: false });
-      }
+      u0 = ulo;
+      v0 = vlo;
+      su = Math.max(1, uhi - ulo);
+      sv = Math.max(1, vhi - vlo);
+    }
+    const sideFace = Math.abs(f.n.y) < 0.7;
+    for (const poly of pieces) {
+      const verts = poly.map((p) => {
+        let shadeF = 0.92 + hash3(p.x, p.y, p.z) * 0.16;
+        if (grounded && sideFace) shadeF *= 0.7 + 0.3 * Math.min(1, (p.y - b.mins.y) / 110);
+        if (f.n.y < -0.7) shadeF *= 0.75;
+        return {
+          p,
+          u: (dot(p, tu) - u0) / su,
+          v: (dot(p, tv) - v0) / sv,
+          c: [tint[0] * shadeF, tint[1] * shadeF, tint[2] * shadeF],
+        };
+      });
+      polys.push({ name, layer, n: f.n, verts, split: false });
     }
   }
   return polys;
@@ -268,7 +399,7 @@ function weldVertices(polys) {
 // Insert every vertex that lies strictly inside a polygon edge into that edge.
 function fixTJunctions(polys) {
   const grid = new Map();
-  const cellKey = (x, y, z) => `${x},${y},${z}`;
+  const cellKey = (x, y, z) => ((x + 512) * 1024 + (y + 512)) * 1024 + (z + 512); // the world is well within ±512 cells
   const seen = new Set();
   for (const poly of polys) {
     for (const v of poly.verts) {
@@ -280,50 +411,66 @@ function fixTJunctions(polys) {
       cell.push(v.p);
     }
   }
-  for (const poly of polys) {
-    const vs = poly.verts;
-    const out = [];
-    for (let i = 0; i < vs.length; i++) {
-      const A = vs[i];
-      const B = vs[(i + 1) % vs.length];
-      out.push(A);
-      const a = A.p;
-      const b = B.p;
-      const ex = b.x - a.x;
-      const ey = b.y - a.y;
-      const ez = b.z - a.z;
-      const len2 = ex * ex + ey * ey + ez * ez;
-      const hits = [];
-      const x0 = Math.floor((Math.min(a.x, b.x) - 0.01) / TJ_GRID);
-      const x1 = Math.floor((Math.max(a.x, b.x) + 0.01) / TJ_GRID);
-      const y0 = Math.floor((Math.min(a.y, b.y) - 0.01) / TJ_GRID);
-      const y1 = Math.floor((Math.max(a.y, b.y) + 0.01) / TJ_GRID);
-      const z0 = Math.floor((Math.min(a.z, b.z) - 0.01) / TJ_GRID);
-      const z1 = Math.floor((Math.max(a.z, b.z) + 0.01) / TJ_GRID);
-      for (let cx = x0; cx <= x1; cx++)
-        for (let cy = y0; cy <= y1; cy++)
-          for (let cz = z0; cz <= z1; cz++) {
-            const cell = grid.get(cellKey(cx, cy, cz));
-            if (!cell) continue;
-            for (const p of cell) {
-              if (p === a || p === b) continue;
-              const t = ((p.x - a.x) * ex + (p.y - a.y) * ey + (p.z - a.z) * ez) / len2;
-              if (t <= 1e-6 || t >= 1 - 1e-6) continue;
-              const dx = a.x + ex * t - p.x;
-              const dy = a.y + ey * t - p.y;
-              const dz = a.z + ez * t - p.z;
-              if (dx * dx + dy * dy + dz * dz < 1e-4) hits.push({ t, p });
-            }
-          }
-      if (!hits.length) continue;
-      hits.sort((h1, h2) => h1.t - h2.t);
-      for (const { t, p } of hits) {
-        out.push({ p, u: A.u + (B.u - A.u) * t, v: A.v + (B.v - A.v) * t, c: A.c.map((x, j) => x + (B.c[j] - x) * t) });
-      }
-      poly.split = true;
-    }
-    poly.verts = out;
+  // Inserting a vertex that lies a hair off an edge bends the edge a hair, and another vertex can end
+  // up on one of the new edges: so go again over the polygons that changed, until none do.
+  let todo = polys;
+  for (let pass = 0; todo.length && pass < 8; pass++) {
+    const changed = [];
+    for (const poly of todo) if (splitEdges(poly, grid, cellKey)) changed.push(poly);
+    todo = changed;
   }
+}
+
+// Inserts the vertices in grid that lie on poly's edges into them. True if there were any.
+function splitEdges(poly, grid, cellKey) {
+  const vs = poly.verts;
+  const out = [];
+  let found = false;
+  let own = null; // never insert a vertex the polygon already has (a sliver's vertices lie on its own edges)
+  for (let i = 0; i < vs.length; i++) {
+    const A = vs[i];
+    const B = vs[(i + 1) % vs.length];
+    out.push(A);
+    const a = A.p;
+    const b = B.p;
+    const ex = b.x - a.x;
+    const ey = b.y - a.y;
+    const ez = b.z - a.z;
+    const len2 = ex * ex + ey * ey + ez * ez;
+    const hits = [];
+    const x0 = Math.floor((Math.min(a.x, b.x) - 0.01) / TJ_GRID);
+    const x1 = Math.floor((Math.max(a.x, b.x) + 0.01) / TJ_GRID);
+    const y0 = Math.floor((Math.min(a.y, b.y) - 0.01) / TJ_GRID);
+    const y1 = Math.floor((Math.max(a.y, b.y) + 0.01) / TJ_GRID);
+    const z0 = Math.floor((Math.min(a.z, b.z) - 0.01) / TJ_GRID);
+    const z1 = Math.floor((Math.max(a.z, b.z) + 0.01) / TJ_GRID);
+    for (let cx = x0; cx <= x1; cx++)
+      for (let cy = y0; cy <= y1; cy++)
+        for (let cz = z0; cz <= z1; cz++) {
+          const cell = grid.get(cellKey(cx, cy, cz));
+          if (!cell) continue;
+          for (const p of cell) {
+            if (p === a || p === b) continue;
+            const t = ((p.x - a.x) * ex + (p.y - a.y) * ey + (p.z - a.z) * ez) / len2;
+            if (t <= 1e-6 || t >= 1 - 1e-6) continue;
+            const dx = a.x + ex * t - p.x;
+            const dy = a.y + ey * t - p.y;
+            const dz = a.z + ez * t - p.z;
+            if (dx * dx + dy * dy + dz * dz < 1e-4) hits.push({ t, p });
+          }
+        }
+    if (!hits.length) continue;
+    own ??= new Set(vs.map((v) => v.p));
+    const add = hits.filter((h) => !own.has(h.p)).sort((h1, h2) => h1.t - h2.t);
+    if (!add.length) continue;
+    for (const { t, p } of add) {
+      out.push({ p, u: A.u + (B.u - A.u) * t, v: A.v + (B.v - A.v) * t, c: A.c.map((x, j) => x + (B.c[j] - x) * t) });
+    }
+    poly.split = true;
+    found = true;
+  }
+  poly.verts = out;
+  return found;
 }
 
 // For tests: count polygon-edge T-junctions remaining in built geometry.

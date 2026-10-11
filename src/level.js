@@ -199,9 +199,8 @@ export function buildLevel() {
       // (ax, az): direction along the side, (nx, nz): outward normal
       const so = (opts.sides && opts.sides[name]) || {};
       const dI = so.dIn ?? dIn;
-      // The sides overlap at the corners. East and west stop 1 unit short (outer face and ends), so no face
-      // lies in the same plane as another side's face there (they'd flicker against each other).
-      const dOut = dI + depth - (name === 'E' || name === 'W' ? 1 : 0);
+      // (the sides overlap at the corners: the mesh builder drops the faces buried there, see worldgeo.js)
+      const dOut = dI + depth;
       const hLo = so.hMin ?? hMin;
       const hHi = so.hMax ?? hMax;
       const [sA, sB] = so.sRange ?? [-dOut, dOut];
@@ -587,7 +586,7 @@ export function buildLevel() {
   const PINK = [1, 0.84, 0.94];
   const CYAN = [0.84, 0.97, 1];
   // the pass: speed lanes through the canyon (west lane goes out, east lane brings you home)
-  strip(VX, -250, -4100, -70, 8, 'W', 1200); // (up to the plateau's edge: overlapping, their tops would flicker)
+  strip(VX, -250, -4100, -70, 8, 'W', 1200); // (up to the plateau's edge)
   strip(VX, 70, -4100, 250, 8, 'E', 1200);
   // greek gateway on the park side
   for (const gz of [-340, 340]) {

@@ -210,7 +210,7 @@ export function buildPoolrooms(api) {
       [-1100, -380],
       [380, 1100],
     ])
-      for (let i = 0; i < 6; i++) box(920 + 56 * i, F, z0, i < 5 ? 976 + 56 * i : 1268, F + 48 * (i + 1), z1, i % 2 ? TRIM : TILE); // side by side, not overlapping (or their faces flicker)
+      for (let i = 0; i < 6; i++) box(920 + 56 * i, F, z0, i < 5 ? 976 + 56 * i : 1268, F + 48 * (i + 1), z1, i % 2 ? TRIM : TILE); // side by side
     // the Bubble Line
     box(-1650, F, -60, -700, F + 8, 60, CURRENT, { phys: 'boost', boostDir: { x: 1, y: 0, z: 0 }, boostSpeed: 900 });
     const loopY = F + 800;
@@ -456,7 +456,7 @@ export function buildPoolrooms(api) {
     const half = 900;
     deep(c.x - half, c.z - half, c.x + half, c.z + half, 520);
     for (let i = 0; i < 20; i++) squareRing(c, half - 30 * i, half - 30 * (i + 1), F - 520, F - 16 * (i + 1), i % 4 === 3 ? { top: 'pooltrimM', side: 'pooltrimM', bottom: 'none' } : { top: 'poolaquaM', side: 'poolaquaM', bottom: 'none' });
-    // the island is a ring round the jet (not under it: their tops would flicker against each other)
+    // the island is a ring round the jet
     for (let k = 0; k < 16; k++) {
       const a0 = (k * Math.PI) / 8;
       const a1 = ((k + 1) * Math.PI) / 8;
@@ -518,8 +518,7 @@ export function buildPoolrooms(api) {
     v[N][2] = v[N][6] = false;
     h[1][N] = h[5][N] = false;
     const WALL = { top: 'none', side: 'pooltileM', bottom: 'none' };
-    // merge runs of wall into single brushes; their ends stop just inside the walls they meet (flush, the
-    // faces would flicker against each other)
+    // merge runs of wall into single brushes; their ends stop just inside the walls they meet
     for (let i = 0; i <= N; i++) {
       for (let j = 0; j < N; ) {
         if (!v[i][j]) {

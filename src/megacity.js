@@ -105,8 +105,7 @@ export function buildMegacity(api) {
     const a = ((rampSeg + 0.5) * Math.PI * 2) / HW.N;
     const to = at(9300, a);
     const d = norm({ x: to.x - from.x, z: to.z - from.z });
-    // a unit lower than the gates' speed lanes and the pads it runs into: where they overlap, tops at the
-    // same height would flicker against each other
+    // a unit lower than the gates' speed lanes and the pads it runs into
     slab(from, to, 150, 0, 7, { top: 'megaboost', side: 'neon' }, { phys: 'boost', boostDir: d, boostSpeed: 1600 });
   };
   feeder({ x: 900, z: -4960 }, 12);
@@ -278,21 +277,20 @@ export function buildMegacity(api) {
   {
     const crown = { x: -5900, z: 5900 };
     const ICE = { top: 'megaice', side: 'megamarble' };
-    // the pieces overlap, so each sits a unit or so off its neighbours (tops at the same height would
-    // flicker against each other): the crown on top, the fronds in three alternating heights, the trunk
-    cylinder(crown.x, crown.z, 300, 0, 41, 12, ICE, { ...M, phys: 'ice' });
-    slab(crown, { x: -4800, z: 4800 }, 260, 0, 37, ICE, { phys: 'ice' });
+    // the crown, the stalk towards the park and the fronds: one flush sheet of ice, the trunk
+    const top = 40;
+    cylinder(crown.x, crown.z, 300, 0, top, 12, ICE, { ...M, phys: 'ice' });
+    slab(crown, { x: -4800, z: 4800 }, 260, 0, top, ICE, { phys: 'ice' });
     const out = Math.atan2(Math.SQRT1_2, -Math.SQRT1_2); // pointing away from the park
     for (let i = 0; i < 7; i++) {
       const a = out + ((i - 3) * 25 * Math.PI) / 180;
       const tip = at(1300, a);
       const B = { x: crown.x + tip.x, z: crown.z + tip.z };
-      const top = 40 - (i % 3);
       slab(crown, B, 150, 0, top, ICE, { phys: 'ice' });
       cylinder(B.x, B.z, 14, top, 460, 6, 'bark', { tint: [1, 0.7, 0.8] });
       decor.push({ type: 'palm', x: B.x, z: B.z, h: 460, r: 200 });
     }
-    cylinder(crown.x, crown.z, 16, 40, 560, 6, 'bark', { tint: [1, 0.7, 0.8] });
+    cylinder(crown.x, crown.z, 16, top, 560, 6, 'bark', { tint: [1, 0.7, 0.8] });
     decor.push({ type: 'palm', x: crown.x, z: crown.z, h: 560, r: 230 });
     // the crescent: a curved wall around the fronds to wallrun along
     for (let i = 0; i < 12; i++) {

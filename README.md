@@ -144,7 +144,9 @@ Everything is plain ground/wall/surf by steepness, plus four physics materials:
 - `src/collision.js` + `src/brush.js`: convex brushes and swept-box traces (port of Q3's box-vs-brush clip, with exact bevel planes).
 - `src/sim.js`: fixed 125 Hz deterministic simulation (rockets, pads, rings, orbs, water, portals). No DOM, so it runs in Node.
 - `src/level.js`, `src/megacity.js`, `src/parthenon.js`, `src/poolrooms.js`: the map, built from brushes in code. The
-  ground is a "crust" between the park and the Poolrooms below; its underside is their ceiling.
+  ground is a "crust" between the park and the Poolrooms below; its underside is their ceiling. Brushes may overlap
+  freely: like Quake's map compiler, the mesh builder (`src/render/worldgeo.js`) cuts away every bit of a face that's
+  inside another brush or pressed against one, so there are no buried faces left to flicker through (z-fighting).
 - `src/render/`: three.js with custom PS1 shaders: low-res render target (360p by default), vertex snapping (wobble), affine texture
   mapping (faded to perspective-correct right next to the camera so close-up floors don't smear), Gouraud lighting, fog, and a 15-bit ordered-dither upscale pass. All textures are generated procedurally.
 - `src/audio.js`: all sound synthesized with WebAudio, including a generative ambient soundtrack.
@@ -165,7 +167,8 @@ Everything is plain ground/wall/surf by steepness, plus four physics materials:
   Poolrooms below are never drawn at the same time.
 - Megastructures use perspective-correct "mega" materials with coarse mesh cells, so they stay cheap.
 - Anti-flicker: textures are mipmapped (nearest up close, filtered far away), the vertex wobble fades out
-  with distance, and translucent effects use real blending instead of dither patterns.
+  with distance, translucent effects use real blending instead of dither patterns, and only the outside of the
+  solid world is drawn (no z-fighting: faces buried in other brushes are cut away).
 - Sound pauses whenever the tab is hidden or loses focus.
 
 ## Trailer
@@ -186,9 +189,11 @@ bot runs through the zones (all 16 Obelisk Express rings to the summit, crawling
 beanstalk, the runway, the ice bowl), and a 4-minute random-input fuzz run that checks the player
 never ends up inside geometry. The Poolrooms have their own (`test/poolrooms.test.mjs`): every pier and
 doorway drops you into a hall, falling off the edge anywhere else still respawns you (the piers are the
-only ways in), swimming, the drain, a bot run through each hall's set piece, that no two faces down there
-flicker against each other, and a fuzz run that checks you never get stuck or out. `test/audio.test.mjs`
-checks the sound follows focus however quickly it comes and goes.
+only ways in), swimming, the drain, a bot run through each hall's set piece, and a fuzz run that checks you
+never get stuck or out. `test/mesh.test.mjs` checks the world mesh: watertight (no T-junctions), every bit of
+surface you can see drawn exactly once and nothing buried drawn, and no two faces facing the same way closer than
+the depth buffer can tell apart from across the map (32 units above ground, 16 in the Poolrooms), so nothing
+z-fights. `test/audio.test.mjs` checks the sound follows focus however quickly it comes and goes.
 
 Debug URL flags: `?autostart` (skip the menu), `?nolock` (no pointer lock or fullscreen), `?timerloop` (drive frames
 with timers so hidden tabs keep simulating), `?res=480`, `?bench` (benchmark). In the console, `game.bot(policy)` runs a

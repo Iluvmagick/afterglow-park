@@ -80,13 +80,19 @@ function facePolygon(pts, plane) {
     })
     .sort((a, b) => a.a - b.a)
     .map((e) => e.p);
-  // drop collinear points
-  const out = [];
-  for (let i = 0; i < sorted.length; i++) {
-    const a = sorted[(i + sorted.length - 1) % sorted.length];
-    const b = sorted[i];
-    const cc = sorted[(i + 1) % sorted.length];
-    if (length(cross(sub(b, a), sub(cc, b))) > 1e-4) out.push(b);
+  // keep only the corners: drop points on an edge, and points inside the face (a point can lie in
+  // the face's plane without being a corner of it: then it dents the polygon in)
+  const out = sorted;
+  for (let dropped = true; dropped && out.length >= 3; ) {
+    dropped = false;
+    for (let i = 0; i < out.length && out.length >= 3; i++) {
+      const a = out[(i + out.length - 1) % out.length];
+      const b = out[i];
+      const cc = out[(i + 1) % out.length];
+      if (dot(cross(sub(b, a), sub(cc, b)), plane.n) > 1e-4) continue;
+      out.splice(i--, 1);
+      dropped = true;
+    }
   }
   return out;
 }
