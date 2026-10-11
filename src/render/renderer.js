@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PS1Post, ps1Material, makeTexture, shared } from './ps1.js';
+import { PS1Post, ps1Material, makeTexture, setWater, shared } from './ps1.js';
 import { TEXTURES, MATERIALS } from './textures.js';
 import { buildBrushGeometry, buildTreeGeometry, buildPalmGeometry } from './worldgeo.js';
 import { Sky, FOG_COLOR } from './sky.js';
@@ -260,50 +260,15 @@ export class GameRenderer {
     }
   }
 
-  // The Poolrooms: the water over everything down there and in the piers' pools, and the piers' glowing
-  // doorways.
+  // The Poolrooms: the water over everything down there and in the piers' pools (not meshes: everything
+  // seen through the surface tints itself, see ps1.js), and the piers' glowing doorways.
   buildPoolrooms() {
+    this.water = { over: [[]], under: [[]] }; // (pools, look) for setWater
     const pool = this.sim.level.pool;
     if (!pool) return;
-    const sheet = (rects, y, cell) => {
-      const pos = [];
-      const uv = [];
-      for (const [x0, z0, x1, z1] of rects) {
-        for (let x = x0; x < x1; x += cell) {
-          for (let z = z0; z < z1; z += cell) {
-            const xb = Math.min(x1, x + cell);
-            const zb = Math.min(z1, z + cell);
-            for (const [px, pz] of [
-              [x, z],
-              [x, zb],
-              [xb, zb],
-              [x, z],
-              [xb, zb],
-              [xb, z],
-            ]) {
-              pos.push(px, y, pz);
-              uv.push(px / 256, pz / 256);
-            }
-          }
-        }
-      }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-      g.computeBoundingSphere();
-      return g;
-    };
-    const water = (tint, opacity) =>
-      ps1Material({ map: this.textures.poolwater, lit: false, vertexColors: false, side: THREE.DoubleSide, blend: true, opacity, tint, uvScroll: [0.03, 0.017], overrides: { uAffine: { value: 0 } } });
-    const flood = new THREE.Mesh(sheet(pool.waterRects, pool.water, 1024), water([0.85, 1, 1], 0.32));
-    this.scene.add(flood);
-    this.underMeshes.push(flood);
-    const pierWater = water([0.55, 0.95, 1], 0.8);
-    for (const w of pool.piers.water) {
-      const m = new THREE.Mesh(sheet([w.rect], w.y, 128), pierWater);
-      this.scene.add(m);
-      this.overMeshes.push(m);
-    }
+    const map = this.textures.poolwater;
+    this.water.under = [pool.waterRects.map((rect) => ({ rect, y: pool.water })), { map, tint: [0.85, 1, 1], opacity: 0.32 }];
+    this.water.over = [pool.piers.water, { map, tint: [0.55, 0.95, 1], opacity: 0.8 }];
     // light fills the doorways (a pane inside the wall, so the arch frames it)
     const glowMat = ps1Material({ lit: false, side: THREE.DoubleSide, blend: true, opacity: 0.65 });
     for (const g of pool.piers.glows) {
@@ -340,6 +305,8 @@ export class GameRenderer {
     for (const m of this.overMeshes || []) m.visible = !under;
     for (const m of this.underMeshes || []) m.visible = mode !== 'world';
     for (const m of this.skyBeams || []) m.visible = !under;
+    // (from out past the edge, the Poolrooms' water is behind their sealing wall)
+    setWater(...this.water[under ? 'under' : 'over']);
   }
 
   resize() {
@@ -572,7 +539,9 @@ export class GameRenderer {
       r.render(this.sky.scene, this.sky.camera);
       r.clearDepth();
     }
+    shared.uWaterOn.value = 1; // (the sky and the gun aren't in the world's space)
     r.render(this.scene, this.camera);
+    shared.uWaterOn.value = 0;
     r.clearDepth();
     r.render(this.view.scene, this.view.camera);
     this.post.present(r);

@@ -4,6 +4,7 @@ import { buildLevel } from '../src/level.js';
 import { buildBrushGeometry, carveFaces, countTJunctions, faceHidden } from '../src/render/worldgeo.js';
 import { mulberry32 } from '../src/math.js';
 import { POOL } from '../src/poolrooms.js';
+import { WATER_POOLS } from '../src/render/ps1.js';
 import { boxBrush } from './helpers.mjs';
 
 const level = buildLevel();
@@ -220,7 +221,8 @@ test('no flicker: drawn faces facing the same way never overlap closer than the 
   // (low-res) pixel: at the lowest resolution and widest field of view, two faces can shift ~15
   // units apart, so even in the Poolrooms (where the haze ends at 6500) the gap must be 16.
   // Carving (worldgeo.js) already removed every face that's buried in or pressed against another
-  // brush, so brushes can overlap freely; what's left are faces really standing apart.
+  // brush, so brushes can overlap freely; what's left are faces really standing apart. (The water
+  // has no faces: see the next test.)
   const MIN_GAP = { over: 32, under: 16 };
   const pad = MIN_GAP.over;
   const cells = spatial(pieces, 512, pad);
@@ -284,4 +286,19 @@ test('no flicker: drawn faces facing the same way never overlap closer than the 
     }
   }
   assert.deepEqual(bad, []);
+});
+
+test('no flicker: the translucent water is no mesh, the shader has room for every pool of it', () => {
+  // A translucent sheet of water flickered against the tops 4 units over and under it (and the floor,
+  // 12 under it, at the widest field of view). So the Poolrooms' and the piers' water have no faces:
+  // whatever you see through the surface tints itself (ps1.js), which can't flicker, however close
+  // anything is to the surface. The shader holds WATER_POOLS rectangles at a time: the Poolrooms'
+  // while you're down there, the piers' up here (renderer.js).
+  const { pool } = level;
+  assert.ok(pool.waterRects.length <= WATER_POOLS, `${pool.waterRects.length} pools down there`);
+  assert.ok(pool.piers.water.length <= WATER_POOLS, `${pool.piers.water.length} pools on the piers`);
+  for (const w of [...pool.waterRects.map((rect) => ({ rect, y: pool.water })), ...pool.piers.water]) {
+    const [x0, z0, x1, z1] = w.rect;
+    assert.ok(x0 < x1 && z0 < z1 && Number.isFinite(w.y), JSON.stringify(w));
+  }
 });

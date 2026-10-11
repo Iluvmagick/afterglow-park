@@ -6,7 +6,14 @@
 // smearing into long streaks. So texture lookups blend from perspective-correct near the camera
 // to fully affine further out: no smears when sliding along a floor, PS1 swim in the distance.
 // uAffineNear must exceed the largest triangle size (world faces are cut into 128-unit cells).
+//
+// Water isn't a mesh: a translucent sheet a few units over or under a surface flickers against it
+// (z-fighting) once the vertex snapping moves both by a few units. Instead, whatever you see through
+// the water's surface tints itself by the water where your line of sight crosses the surface
+// (WATER below), so there's nothing left for anything near the surface to flicker against.
 import * as THREE from 'three';
+
+export const WATER_POOLS = 4; // rectangles of water at a time (see setWater)
 
 export const shared = {
   uRes: { value: new THREE.Vector2(320, 240) },
@@ -25,7 +32,58 @@ export const shared = {
   uAffine: { value: 1 },
   uAffineNear: { value: 190 },
   uAffineFar: { value: 560 },
+  // the water (see setWater); only on while the world is drawn, the sky and the gun have cameras of their own
+  uWaterOn: { value: 0 },
+  uWater: { value: Array.from({ length: WATER_POOLS }, () => new THREE.Vector4(1, 1, -1, -1)) },
+  uWaterY: { value: new Array(WATER_POOLS).fill(0) },
+  uWaterMap: { value: null },
+  uWaterTint: { value: new THREE.Color(1, 1, 1) },
+  uWaterOpacity: { value: 0 },
+  uWaterScroll: { value: new THREE.Vector2(0.03, 0.017) },
 };
+
+// The water: pools [{ rect: [x0, z0, x1, z1], y }] (y: the surface), drawn with texture map (one repeat
+// per 256 units) at the given tint and opacity.
+export function setWater(pools, { map = null, tint = [1, 1, 1], opacity = 0 } = {}) {
+  if (pools.length > WATER_POOLS) throw new Error(`at most ${WATER_POOLS} pools of water at a time, not ${pools.length}`);
+  shared.uWater.value.forEach((v, i) => (pools[i] ? v.set(...pools[i].rect) : v.set(1, 1, -1, -1)));
+  shared.uWaterY.value.forEach((_, i, ys) => (ys[i] = pools[i] ? pools[i].y : 0));
+  shared.uWaterMap.value = map;
+  shared.uWaterTint.value.setRGB(...tint);
+  shared.uWaterOpacity.value = opacity;
+}
+
+// The water's surface over the pixel of world position p, seen from the camera: mixed over color c.
+const WATER = /* glsl */ `
+  uniform float uWaterOn;
+  uniform vec4 uWater[${WATER_POOLS}];
+  uniform float uWaterY[${WATER_POOLS}];
+  uniform sampler2D uWaterMap;
+  uniform vec3 uWaterTint;
+  uniform float uWaterOpacity;
+  uniform vec2 uWaterScroll;
+  uniform float uTime;
+  vec3 seenThroughWater(vec3 c, vec3 p) {
+    float wet = 0.0;
+    vec3 hit = p;
+    for (int i = 0; i < ${WATER_POOLS}; i++) {
+      float a = cameraPosition.y - uWaterY[i];
+      float b = p.y - uWaterY[i];
+      // where the line of sight crosses the surface's plane (or would, beyond p: then the texture
+      // lookups stay continuous from pixel to pixel, so they get the same mipmaps the sheet got)
+      hit = cameraPosition + (p - cameraPosition) * (a / (abs(a - b) > 1e-4 ? a - b : 1e-4));
+      vec4 r = uWater[i];
+      if (a * b < 0.0 && hit.x > r.x && hit.x < r.z && hit.z > r.y && hit.z < r.w) {
+        wet = 1.0;
+        break;
+      }
+    }
+    vec3 w = texture2D(uWaterMap, hit.xz / 256.0 + uWaterScroll * uTime).rgb * uWaterTint;
+    float fog = clamp((distance(hit, cameraPosition) - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
+    // (lit colors go over 1: clamp first, as the framebuffer did under the old sheet)
+    return mix(clamp(c, 0.0, 1.0), mix(w, uFogColor, fog), wet * uWaterOpacity);
+  }
+`;
 
 const SNAP = /* glsl */ `
   if (uSnap > 0.0 && uSnapOn > 0.5 && clip.w > 0.0) {
@@ -54,8 +112,10 @@ const VERT = /* glsl */ `
   varying vec2 vUv;
   varying vec3 vCol;
   varying vec3 vView;
+  varying vec3 vWorld;
   void main() {
     vec4 wp = modelMatrix * vec4(position, 1.0);
+    vWorld = wp.xyz; // (where the surface really is, not where the snapping moved it)
     vec4 mv = viewMatrix * wp;
     vec4 clip = projectionMatrix * mv;
     ${SNAP}
@@ -104,7 +164,9 @@ const FRAG = /* glsl */ `
   varying vec2 vUv;
   varying vec3 vCol;
   varying vec3 vView;
+  varying vec3 vWorld;
   ${DITHER}
+  ${WATER}
   void main() {
     if (uBlend < 0.5 && uOpacity < 0.999 && bayer(gl_FragCoord.xy) > uOpacity) discard;
     vec4 tex = vec4(1.0);
@@ -118,6 +180,7 @@ const FRAG = /* glsl */ `
     // fog per pixel, not per vertex: big faces (the Poolrooms' floors) would fog wrong otherwise
     float fog = clamp((length(vView) - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
     c = mix(c, uFogColor, fog * uFog);
+    if (uWaterOn > 0.5) c = seenThroughWater(c, vWorld);
     gl_FragColor = vec4(c, uBlend > 0.5 ? uOpacity : 1.0);
   }
 `;
@@ -191,7 +254,9 @@ export function particleMaterial() {
       attribute float size;
       varying vec3 vCol;
       varying float vFog;
+      varying vec3 vWorld;
       void main() {
+        vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         vec4 clip = projectionMatrix * mv;
         ${SNAP}
@@ -203,10 +268,16 @@ export function particleMaterial() {
     `,
     fragmentShader: /* glsl */ `
       uniform vec3 uFogColor;
+      uniform float uFogNear;
+      uniform float uFogFar;
       varying vec3 vCol;
       varying float vFog;
+      varying vec3 vWorld;
+      ${WATER}
       void main() {
-        gl_FragColor = vec4(mix(vCol, uFogColor, vFog * 0.7), 1.0);
+        vec3 c = mix(vCol, uFogColor, vFog * 0.7);
+        if (uWaterOn > 0.5) c = seenThroughWater(c, vWorld);
+        gl_FragColor = vec4(c, 1.0);
       }
     `,
   });

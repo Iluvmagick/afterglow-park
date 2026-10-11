@@ -168,7 +168,8 @@ Everything is plain ground/wall/surf by steepness, plus four physics materials:
 - Megastructures use perspective-correct "mega" materials with coarse mesh cells, so they stay cheap.
 - Anti-flicker: textures are mipmapped (nearest up close, filtered far away), the vertex wobble fades out
   with distance, translucent effects use real blending instead of dither patterns, and only the outside of the
-  solid world is drawn (no z-fighting: faces buried in other brushes are cut away).
+  solid world is drawn (no z-fighting: faces buried in other brushes are cut away). The Poolrooms' water isn't
+  a sheet: everything seen through its surface tints itself, so nothing near the surface can flicker against it.
 - Sound pauses whenever the tab is hidden or loses focus.
 
 ## Trailer
@@ -193,7 +194,7 @@ only ways in), swimming, the drain, a bot run through each hall's set piece, and
 never get stuck or out. `test/mesh.test.mjs` checks the world mesh: watertight (no T-junctions), every bit of
 surface you can see drawn exactly once and nothing buried drawn, and no two faces facing the same way closer than
 the depth buffer can tell apart from across the map (32 units above ground, 16 in the Poolrooms), so nothing
-z-fights. `test/audio.test.mjs` checks the sound follows focus however quickly it comes and goes.
+z-fights (the water has no faces to fight with). `test/audio.test.mjs` checks the sound follows focus however quickly it comes and goes.
 
 Debug URL flags: `?autostart` (skip the menu), `?nolock` (no pointer lock or fullscreen), `?timerloop` (drive frames
 with timers so hidden tabs keep simulating), `?res=480`, `?bench` (benchmark). In the console, `game.bot(policy)` runs a

@@ -32,22 +32,13 @@ function faceMaterial(mat, n) {
   return mat.side;
 }
 
-// Faces nobody can ever see, so they're never drawn: faces with the material 'none', and faces
-// buried in the ground. The ground is a "crust" between the park (y 0) and the Poolrooms' ceiling
-// (y POOL.ceil); the crust's own faces are always drawn (its underside is the Poolrooms' ceiling,
-// its sides line the shaft down and the world's edge). Everything else gets drawn, minus the parts
-// other brushes bury (see carveFaces): guessing which faces are "never visible" once left holes in
-// the mountains you could see through.
+// Faces nobody can ever see, so they're never drawn: faces with the material 'none'. Everything else
+// gets drawn, minus the parts other brushes bury (see carveFaces): guessing which faces are "never
+// visible" left holes you could see through (in the mountains; and "everything between the Poolrooms'
+// ceiling and y 0 is buried in the ground" took the walls out of the piers' pools, out past the
+// ground's edge).
 export function faceHidden(b, f) {
-  if (faceMaterial(b.mat, f.n) === 'none') return true;
-  if (b.crust) return false;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const p of f.poly) {
-    minY = Math.min(minY, p.y);
-    maxY = Math.max(maxY, p.y);
-  }
-  return maxY <= 0.01 && minY >= POOL.ceil - 0.01 && f.n.y < 0.5;
+  return faceMaterial(b.mat, f.n) === 'none';
 }
 
 const ON = 0.05; // a polygon this close to a plane is in it
