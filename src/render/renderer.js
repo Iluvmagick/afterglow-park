@@ -99,6 +99,35 @@ export class GameRenderer {
     this.time = 0;
     this.tmp = new THREE.Vector3();
     this.resize();
+    this.warmUp();
+  }
+
+  // Compile every shader and upload every mesh and texture now, while the menu is up. three.js does
+  // that the first time something is drawn, and that froze the game in the middle of a run: 100+ ms
+  // for a shader, tens of ms when the Poolrooms first came into view.
+  warmUp() {
+    const saved = [];
+    const show = (o) => {
+      saved.push([o, o.visible, o.frustumCulled]);
+      o.visible = true;
+      o.frustumCulled = false;
+      for (const m of [].concat(o.material || [])) {
+        if (m.visible) continue;
+        saved.push([m, false]);
+        m.visible = true;
+      }
+    };
+    for (const scene of [this.scene, this.sky.scene, this.view.scene]) scene.traverse(show);
+    const r = this.renderer;
+    r.setRenderTarget(this.post.rt);
+    r.render(this.sky.scene, this.sky.camera);
+    r.render(this.scene, this.camera);
+    r.render(this.view.scene, this.view.camera);
+    this.post.present(r);
+    for (const [o, visible, culled] of saved) {
+      o.visible = visible;
+      if (culled !== undefined) o.frustumCulled = culled;
+    }
   }
 
   buildWorld() {
@@ -310,16 +339,18 @@ export class GameRenderer {
   }
 
   resize() {
-    // fixedSize (used by the trailer recorder) pins the output resolution regardless of the window
-    const dpr = this.fixedSize ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+    // fixedSize (used by the trailer recorder) pins the output size regardless of the window
     const w = this.fixedSize ? this.fixedSize.w : window.innerWidth;
     const h = this.fixedSize ? this.fixedSize.h : window.innerHeight;
-    this.renderer.setPixelRatio(dpr);
-    this.renderer.setSize(w, h, false);
-    this.canvas.style.width = w + 'px';
-    this.canvas.style.height = h + 'px';
     const lowH = this.settings.lowHeight;
     const lowW = Math.max(1, Math.round((lowH * w) / h));
+    // The canvas is only as big as the low-res picture, and CSS scales it up, pixelated (like the HUD).
+    // Drawn at the screen's resolution instead (7.7 million pixels full screen on a 16" MacBook), the
+    // upscale and the browser compositing it cost more than the whole game, for the same picture.
+    this.renderer.setPixelRatio(1);
+    this.renderer.setSize(lowW, lowH, false);
+    this.canvas.style.width = w + 'px';
+    this.canvas.style.height = h + 'px';
     this.lowW = lowW;
     this.lowH = lowH;
     this.post.setSize(lowW, lowH);

@@ -162,9 +162,14 @@ Everything is plain ground/wall/surf by steepness, plus four physics materials:
   GPU to finish, so it reports the real cost of a frame (and fps headroom at p95) rather than being
   capped by the display refresh rate. Results also go to the console as JSON (`AFTERGLOW BENCH ...`).
   Run it in a visible, focused tab: background tabs get throttled and report garbage.
-- The world mesh is chunked into 2560-unit tiles so off-screen chunks are frustum-culled, underground
-  faces nobody can see are skipped, and the HUD font draws from a glyph atlas. The world above and the
-  Poolrooms below are never drawn at the same time.
+- The world mesh is chunked into 2560-unit tiles so off-screen chunks are frustum-culled, faces buried in
+  the ground or in other brushes are cut away, and the HUD font draws from a glyph atlas. The world above and
+  the Poolrooms below are never drawn at the same time.
+- The game canvas is only as big as the low-res picture (360 lines by default) and CSS scales it up,
+  pixelated, like the HUD: at full resolution the upscale alone was ~7.7 million pixels a frame on a 16"
+  MacBook, plus the browser compositing them. Every shader, mesh and texture is set up at load, so nothing
+  stalls the game the first time it comes into view (that was 100+ ms for a shader, tens of ms for the
+  Poolrooms' meshes).
 - Megastructures use perspective-correct "mega" materials with coarse mesh cells, so they stay cheap.
 - Anti-flicker: textures are mipmapped (nearest up close, filtered far away), the vertex wobble fades out
   with distance, translucent effects use real blending instead of dither patterns, and only the outside of the

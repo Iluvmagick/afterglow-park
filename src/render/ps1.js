@@ -13,7 +13,7 @@
 // (WATER below), so there's nothing left for anything near the surface to flicker against.
 import * as THREE from 'three';
 
-export const WATER_POOLS = 4; // rectangles of water at a time (see setWater)
+export const WATER_POOLS = 4; // rectangles of water at a time (see setWater; their heights share a vec4)
 
 export const shared = {
   uRes: { value: new THREE.Vector2(320, 240) },
@@ -32,10 +32,11 @@ export const shared = {
   uAffine: { value: 1 },
   uAffineNear: { value: 190 },
   uAffineFar: { value: 560 },
-  // the water (see setWater); only on while the world is drawn, the sky and the gun have cameras of their own
+  // the water (see setWater); only on while the world is drawn, the sky and the gun have cameras of their own.
+  // (Not uniform arrays: three.js sends those again on every switch of material, these only when they change.)
   uWaterOn: { value: 0 },
-  uWater: { value: Array.from({ length: WATER_POOLS }, () => new THREE.Vector4(1, 1, -1, -1)) },
-  uWaterY: { value: new Array(WATER_POOLS).fill(0) },
+  ...Object.fromEntries(Array.from({ length: WATER_POOLS }, (_, i) => [`uWater${i}`, { value: new THREE.Vector4(1, 1, -1, -1) }])),
+  uWaterY: { value: new THREE.Vector4() },
   uWaterMap: { value: null },
   uWaterTint: { value: new THREE.Color(1, 1, 1) },
   uWaterOpacity: { value: 0 },
@@ -46,8 +47,11 @@ export const shared = {
 // per 256 units) at the given tint and opacity.
 export function setWater(pools, { map = null, tint = [1, 1, 1], opacity = 0 } = {}) {
   if (pools.length > WATER_POOLS) throw new Error(`at most ${WATER_POOLS} pools of water at a time, not ${pools.length}`);
-  shared.uWater.value.forEach((v, i) => (pools[i] ? v.set(...pools[i].rect) : v.set(1, 1, -1, -1)));
-  shared.uWaterY.value.forEach((_, i, ys) => (ys[i] = pools[i] ? pools[i].y : 0));
+  for (let i = 0; i < WATER_POOLS; i++) {
+    if (pools[i]) shared[`uWater${i}`].value.set(...pools[i].rect);
+    else shared[`uWater${i}`].value.set(1, 1, -1, -1);
+    shared.uWaterY.value.setComponent(i, pools[i] ? pools[i].y : 0);
+  }
   shared.uWaterMap.value = map;
   shared.uWaterTint.value.setRGB(...tint);
   shared.uWaterOpacity.value = opacity;
@@ -56,14 +60,15 @@ export function setWater(pools, { map = null, tint = [1, 1, 1], opacity = 0 } = 
 // The water's surface over the pixel of world position p, seen from the camera: mixed over color c.
 const WATER = /* glsl */ `
   uniform float uWaterOn;
-  uniform vec4 uWater[${WATER_POOLS}];
-  uniform float uWaterY[${WATER_POOLS}];
+  ${Array.from({ length: WATER_POOLS }, (_, i) => `uniform vec4 uWater${i};`).join(' ')}
+  uniform vec4 uWaterY;
   uniform sampler2D uWaterMap;
   uniform vec3 uWaterTint;
   uniform float uWaterOpacity;
   uniform vec2 uWaterScroll;
   uniform float uTime;
   vec3 seenThroughWater(vec3 c, vec3 p) {
+    vec4 pools[${WATER_POOLS}] = vec4[${WATER_POOLS}](${Array.from({ length: WATER_POOLS }, (_, i) => `uWater${i}`).join(', ')});
     float wet = 0.0;
     vec3 hit = p;
     for (int i = 0; i < ${WATER_POOLS}; i++) {
@@ -72,7 +77,7 @@ const WATER = /* glsl */ `
       // where the line of sight crosses the surface's plane (or would, beyond p: then the texture
       // lookups stay continuous from pixel to pixel, so they get the same mipmaps the sheet got)
       hit = cameraPosition + (p - cameraPosition) * (a / (abs(a - b) > 1e-4 ? a - b : 1e-4));
-      vec4 r = uWater[i];
+      vec4 r = pools[i];
       if (a * b < 0.0 && hit.x > r.x && hit.x < r.z && hit.z > r.y && hit.z < r.w) {
         wet = 1.0;
         break;
