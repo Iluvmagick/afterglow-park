@@ -4,7 +4,7 @@ import { TEXTURES, MATERIALS } from './textures.js';
 import { buildBrushGeometry, buildTreeGeometry, buildPalmGeometry } from './worldgeo.js';
 import { Sky, FOG_COLOR } from './sky.js';
 import { Particles } from './fx.js';
-import { ViewModel } from './viewmodel.js';
+import { ViewModel, BOB_EASE } from './viewmodel.js';
 import * as M from '../math.js';
 import { WEAPON } from '../sim.js';
 
@@ -92,6 +92,7 @@ export class GameRenderer {
     this.dip = 0;
     this.dipVel = 0;
     this.bob = 0;
+    this.bobAmt = 0;
     this.fovKick = 0;
     this.lastYaw = 0;
     this.lastPitch = 0;
@@ -491,8 +492,11 @@ export class GameRenderer {
     this.dipVel += (-this.dip * 160 - this.dipVel * 16) * dt;
     this.dip += this.dipVel * dt;
     if (p.onGround && !p.sliding && hs > 30) this.bob += dt * (5.5 + 5 * Math.min(1, hs / 320));
-    const bobAmt = p.onGround && !p.sliding ? Math.min(1, hs / 320) : 0;
-    const bobY = Math.sin(this.bob * 2) * 1.6 * bobAmt;
+    // eased, not switched: a bunny hop touches the ground for a single tick, and an instant switch
+    // jerked the view to the bob's offset for one frame and back
+    const bobTarget = p.onGround && !p.sliding ? Math.min(1, hs / 320) : 0;
+    this.bobAmt += (bobTarget - this.bobAmt) * Math.min(1, dt * BOB_EASE);
+    const bobY = Math.sin(this.bob * 2) * 1.6 * this.bobAmt;
 
     // roll: wallrun lean + gentle strafe roll
     const right = M.rightH(look.yaw);

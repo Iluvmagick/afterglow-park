@@ -8,6 +8,8 @@ import { drawText, textWidth, speedColor } from '../hud.js';
 const SCREEN_W = 64;
 const SCREEN_H = 24;
 const SCREEN_TILT = 0.61; // radians the speed screen leans back toward the player
+// how fast the gun and head bob fade in and out (1/s): a single 8 ms tick on the ground moves them ~8%
+export const BOB_EASE = 10;
 
 // Non-indexed, flat-shaded copy with a solid vertex color (and uvs if missing).
 function prep(geo, color) {
@@ -150,6 +152,7 @@ export class ViewModel {
     this.hookLocal = new THREE.Vector3(0, -4.4, -28);
 
     this.bobPhase = 0;
+    this.bobAmt = 0;
     this.swayX = 0;
     this.swayY = 0;
     this.recoil = 0;
@@ -199,7 +202,10 @@ export class ViewModel {
     // s: { groundSpeed, onGround, sliding, wallSide, dYaw, dPitch }
     const k = Math.min(1, s.groundSpeed / 320);
     if (s.onGround && !s.sliding) this.bobPhase += dt * (6 + 6 * k);
-    const bobAmt = s.onGround && !s.sliding ? k : 0;
+    // eased, not switched: a bunny hop touches the ground for a single tick, and an instant switch
+    // jumped the launcher, speed screen and all, to the bob's offset for one frame and back
+    this.bobAmt += ((s.onGround && !s.sliding ? k : 0) - this.bobAmt) * Math.min(1, dt * BOB_EASE);
+    const bobAmt = this.bobAmt;
     this.swayX += (-s.dYaw * 30 - this.swayX) * Math.min(1, dt * 10);
     this.swayY += (s.dPitch * 30 - this.swayY) * Math.min(1, dt * 10);
     this.swayX = Math.max(-3, Math.min(3, this.swayX));
